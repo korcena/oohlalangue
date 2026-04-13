@@ -2,7 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- interactive-widget=resizes-content tells Chrome Android (108+) and
+         iOS Safari (16.4+) to shrink the *layout* viewport when the
+         keyboard opens, so 100dvh and flex layouts naturally adapt without
+         any JS gymnastics. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, interactive-widget=resizes-content"
+    />
     <title>Ooh La Langue — French conversation practice</title>
     <link
       rel="icon"
@@ -114,6 +121,10 @@
         flex-direction: column;
         gap: 14px;
         scroll-behavior: smooth;
+        /* With only a couple of messages, push them toward the input so
+           the latest question always sits just above the keyboard rather
+           than floating at the top of a tall empty chat area. */
+        justify-content: flex-end;
       }
 
       #chat::-webkit-scrollbar {
