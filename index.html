@@ -345,7 +345,13 @@
 
       .gate {
         position: fixed;
-        inset: 0;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
         background: rgba(26, 26, 46, 0.94);
         backdrop-filter: blur(6px);
         display: flex;
@@ -353,6 +359,9 @@
         justify-content: center;
         z-index: 10;
         padding: 20px;
+        /* Belt-and-braces: on a wide desktop the fixed container spans the
+           whole viewport and flex centers horizontally AND vertically. */
+        margin: 0;
       }
 
       .gate.hidden {
@@ -363,9 +372,12 @@
         background: var(--panel);
         border: 1px solid var(--border);
         border-radius: 18px;
-        padding: 28px 24px 26px;
+        padding: 32px 28px 28px;
         width: 100%;
-        max-width: 380px;
+        max-width: 420px;
+        /* Redundant with flex centering, but guarantees the card is
+           horizontally centered even if a parent ever drops flex. */
+        margin: 0 auto;
         text-align: center;
         box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
         display: flex;
@@ -455,6 +467,69 @@
         margin-top: 10px;
         min-height: 18px;
       }
+
+      /* Pause overlay shown after every 5 answers. Reuses the .gate layout
+         for centering. */
+      .pause-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 32px 28px 28px;
+        width: 100%;
+        max-width: 420px;
+        margin: 0 auto;
+        text-align: center;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .pause-card h2 {
+        font-family: 'Playfair Display', serif;
+        font-weight: 700;
+        margin: 0;
+        color: var(--gold);
+        font-size: 26px;
+      }
+
+      .pause-card p {
+        color: var(--muted);
+        font-size: 14px;
+        margin: 0;
+        line-height: 1.5;
+      }
+
+      .pause-timer {
+        font-family: 'Playfair Display', serif;
+        font-size: 44px;
+        font-weight: 700;
+        color: var(--coral);
+        letter-spacing: 2px;
+        font-variant-numeric: tabular-nums;
+        margin: 6px 0 4px;
+      }
+
+      .pause-sub {
+        font-size: 12px;
+        color: var(--muted);
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+
+      /* Tiny pill shown near the header so the student always knows how
+         many answers are left in the current window. */
+      .session-counter {
+        margin-top: 6px;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .session-counter strong {
+        color: var(--gold);
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
@@ -488,6 +563,18 @@
       </form>
     </div>
 
+    <div class="gate hidden" id="pause" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+      <div class="pause-card">
+        <h2 id="pauseTitle">À tout à l'heure&nbsp;!</h2>
+        <p>
+          You've completed 5 answers. Take a break — come back soon to keep
+          learning. Your progress is saved.
+        </p>
+        <div class="pause-timer" id="pauseTimer">03:00:00</div>
+        <div class="pause-sub">until next session</div>
+      </div>
+    </div>
+
     <div class="app">
       <header>
         <h1 class="logo">Ooh La <span class="accent">Langue</span></h1>
@@ -495,6 +582,7 @@
           <span>French conversation practice</span>
           <span class="badge">A1 · Débutant</span>
         </div>
+        <div class="session-counter" id="sessionCounter" aria-live="polite"></div>
       </header>
 
       <div id="chat" aria-live="polite"></div>
@@ -530,7 +618,154 @@
       const gateError = document.getElementById('gateError');
       const PASSWORD_KEY = 'oohlalangue_password';
       const NAME_KEY = 'oohlalangue_name';
+      const PROFILE_KEY = 'oohlalangue_profile';
+      const ANSWERS_KEY = 'oohlalangue_answers';
+      const PAUSE_UNTIL_KEY = 'oohlalangue_pause_until';
+      const ANSWERS_PER_WINDOW = 5;
+      const PAUSE_MS = 3 * 60 * 60 * 1000; // 3 hours
       let passwordRequired = false;
+
+      // ---- Session limit (5 answers → 3h pause, persisted across refreshes) ----
+      const pauseEl = document.getElementById('pause');
+      const pauseTimerEl = document.getElementById('pauseTimer');
+      const sessionCounterEl = document.getElementById('sessionCounter');
+      let pauseTick = null;
+
+      function getAnswers() {
+        try { return parseInt(localStorage.getItem(ANSWERS_KEY) || '0', 10) || 0; } catch (_e) { return 0; }
+      }
+      function setAnswers(n) {
+        try { localStorage.setItem(ANSWERS_KEY, String(n)); } catch (_e) {}
+      }
+      function getPauseUntil() {
+        try { return parseInt(localStorage.getItem(PAUSE_UNTIL_KEY) || '0', 10) || 0; } catch (_e) { return 0; }
+      }
+      function setPauseUntil(ts) {
+        try {
+          if (ts) localStorage.setItem(PAUSE_UNTIL_KEY, String(ts));
+          else localStorage.removeItem(PAUSE_UNTIL_KEY);
+        } catch (_e) {}
+      }
+
+      function formatDuration(ms) {
+        const s = Math.max(0, Math.ceil(ms / 1000));
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${pad(h)}:${pad(m)}:${pad(sec)}`;
+      }
+
+      function updateSessionCounter() {
+        if (!sessionCounterEl) return;
+        const remaining = Math.max(0, ANSWERS_PER_WINDOW - getAnswers());
+        sessionCounterEl.innerHTML =
+          remaining > 0
+            ? `<strong>${remaining}</strong> answer${remaining === 1 ? '' : 's'} left in this session`
+            : '';
+      }
+
+      function showPause() {
+        pauseEl.classList.remove('hidden');
+        sendBtn.disabled = true;
+        input.disabled = true;
+      }
+      function hidePause() {
+        pauseEl.classList.add('hidden');
+        sendBtn.disabled = false;
+        input.disabled = false;
+      }
+
+      function onPauseEnded() {
+        if (pauseTick) { clearInterval(pauseTick); pauseTick = null; }
+        setPauseUntil(0);
+        setAnswers(0);
+        updateSessionCounter();
+        hidePause();
+        // Refreshes ditch in-memory chat history; reload so the normal boot
+        // path (auth check + "Start!" kickoff) fires cleanly. This also
+        // resets the per-session focus module for a fresh feel.
+        try { location.reload(); } catch (_e) {}
+      }
+
+      // Returns true if we're currently paused (and arms the UI).
+      function enforcePauseIfActive() {
+        const until = getPauseUntil();
+        if (!until) return false;
+        const remaining = until - Date.now();
+        if (remaining <= 0) {
+          onPauseEnded();
+          return false;
+        }
+        showPause();
+        pauseTimerEl.textContent = formatDuration(remaining);
+        if (pauseTick) clearInterval(pauseTick);
+        pauseTick = setInterval(() => {
+          const left = getPauseUntil() - Date.now();
+          if (left <= 0) {
+            onPauseEnded();
+          } else {
+            pauseTimerEl.textContent = formatDuration(left);
+          }
+        }, 1000);
+        return true;
+      }
+
+      function recordAnswerAndMaybePause() {
+        const next = getAnswers() + 1;
+        setAnswers(next);
+        updateSessionCounter();
+        if (next >= ANSWERS_PER_WINDOW) {
+          setPauseUntil(Date.now() + PAUSE_MS);
+          enforcePauseIfActive();
+          return true;
+        }
+        return false;
+      }
+
+      // ---- Learned-profile storage (localStorage) ----
+      function getProfile() {
+        try {
+          const raw = localStorage.getItem(PROFILE_KEY);
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string') : [];
+        } catch (_e) { return []; }
+      }
+      function setProfile(list) {
+        try { localStorage.setItem(PROFILE_KEY, JSON.stringify(list.slice(0, 40))); } catch (_e) {}
+      }
+      function addProfileFacts(newFacts) {
+        if (!newFacts || !newFacts.length) return;
+        const existing = getProfile();
+        const seen = new Set(existing.map((s) => s.toLowerCase()));
+        for (const f of newFacts) {
+          const clean = String(f).replace(/[`<>{}\[\]"]/g, '').trim().slice(0, 120);
+          if (!clean) continue;
+          const key = clean.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          existing.push(clean);
+        }
+        // Cap: keep the most recent 40 facts.
+        const capped = existing.slice(-40);
+        setProfile(capped);
+      }
+
+      // Extract and strip hidden <note>...</note> block from teacher text.
+      // Returns { visible, facts[] }.
+      function extractNote(text) {
+        const re = /<note>([\s\S]*?)<\/note>/i;
+        const m = text.match(re);
+        if (!m) return { visible: text, facts: [] };
+        const raw = m[1] || '';
+        const facts = raw
+          .split('|')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const visible = text.replace(re, '').replace(/\n{3,}/g, '\n\n').trim();
+        return { visible, facts };
+      }
 
       function configureGateForRequirement(required) {
         passwordRequired = required;
@@ -619,6 +854,11 @@
         }
 
         configureGateForRequirement(required);
+        updateSessionCounter();
+
+        // If we're mid-pause, just show the timer and stop — no auth flow,
+        // no new conversation started until the pause ends.
+        if (enforcePauseIfActive()) return;
 
         // We always need a name to personalize the conversation.
         const haveName = Boolean(getStoredName());
@@ -814,6 +1054,8 @@
 
       async function send(userText, { display = true } = {}) {
         if (busy) return;
+        // Don't allow anything through while a pause is active.
+        if (enforcePauseIfActive()) return;
         busy = true;
         sendBtn.disabled = true;
 
@@ -826,7 +1068,11 @@
           const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
-            body: JSON.stringify({ messages: history, name: getStoredName() })
+            body: JSON.stringify({
+              messages: history,
+              name: getStoredName(),
+              profile: getProfile()
+            })
           });
           const data = await res.json();
           removeTyping();
@@ -846,17 +1092,31 @@
             return;
           }
 
-          const text = (data && data.text) || '';
-          history.push({ role: 'assistant', content: text });
-          renderTeacherReply(text);
+          const rawText = (data && data.text) || '';
+          // Extract hidden profile notes BEFORE rendering so the student
+          // never sees them. Store the visible text in history too so the
+          // model doesn't think it already knows what was in the <note>.
+          const { visible, facts } = extractNote(rawText);
+          if (facts.length) addProfileFacts(facts);
+          history.push({ role: 'assistant', content: visible });
+          renderTeacherReply(visible);
+
+          // Count this turn only if it was a real student answer (i.e. the
+          // user typed it — not the invisible "Start!" kickoff).
+          if (display) {
+            recordAnswerAndMaybePause();
+          }
         } catch (err) {
           removeTyping();
           showError('Network error: ' + (err && err.message ? err.message : err));
           history.pop();
         } finally {
           busy = false;
-          sendBtn.disabled = false;
-          input.focus();
+          // Keep send disabled if we just entered a pause.
+          if (!enforcePauseIfActive()) {
+            sendBtn.disabled = false;
+            input.focus();
+          }
         }
       }
 

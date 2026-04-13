@@ -198,10 +198,39 @@ function pickRandom(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+// Sanitize a single known-fact string from the client-side profile before
+// interpolating it into the system prompt. Same hygiene as the name.
+function sanitizeFact(raw) {
+  if (typeof raw !== 'string') return '';
+  let s = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  s = s.replace(/[`<>{}\[\]"]/g, '');
+  if (s.length > 120) s = s.slice(0, 120).trim();
+  return s;
+}
+
+function sanitizeProfile(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const clean = sanitizeFact(item);
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
 // `isOpening` is true when this is the very first turn of a new session.
 // We pick ONE curriculum module to focus the session on, so the student
 // actually practices concrete A1 grammar/vocab instead of generic chatter.
-function buildSystemPrompt(rawName, isOpening) {
+// `profile` is an array of short facts the client has learned about the
+// student across sessions; we surface them in the prompt so questions feel
+// personal rather than generic.
+function buildSystemPrompt(rawName, isOpening, profile) {
   const name = sanitizeName(rawName) || 'the student';
   const mod = pickRandom(CURRICULUM_MODULES);
   const greeting = pickRandom(GREETINGS);
@@ -209,6 +238,11 @@ function buildSystemPrompt(rawName, isOpening) {
   const openingBlock = isOpening
     ? `FIRST TURN: Greet ${name} in French with "${greeting} ${name} !" (or a similar warm variation) and ask ONE short A1 question that exercises "${mod.module}" — ${mod.focus}. Inspiration (do NOT copy verbatim): "${mod.hint}". 1–2 sentences total.`
     : `Today's focus module is "${mod.module}" (${mod.focus}). When picking the next question, prefer one that exercises this area, but stay natural — drift to neighbouring modules if the conversation calls for it.`;
+
+  const facts = sanitizeProfile(profile);
+  const profileBlock = facts.length
+    ? `KNOWN ABOUT ${name.toUpperCase()} (use these to personalize questions; reference them naturally):\n- ${facts.join('\n- ')}`
+    : `KNOWN ABOUT ${name.toUpperCase()}: (nothing yet — ask light questions to get to know them)`;
 
   return `You are a warm, playful French teacher helping ${name}, an A1 beginner, practice French. Address ${name} by name naturally.
 
@@ -218,7 +252,7 @@ EACH TURN (after the first):
 ✅ GOOD: [what was right]
 🔧 FIX: [mistake] → [correct form] — [simple English explanation]
 💬 CORRECTED: [full corrected sentence]
-3. Ask ONE new simple A1 question.
+3. Ask ONE new simple A1 question — personalize it with what you know about ${name} when relevant.
 
 RULES:
 - A1 vocabulary only.
@@ -226,6 +260,16 @@ RULES:
 - Watch: elision (j'), je + conjugated verb (not infinitive), ne…pas, gender (le/la/un/une), lowercase days/months, "aussi" after the verb, en/au/aux, à+le=au, de+le=du.
 - Simple English explanations only.
 - Vary your phrasing between sessions.
+
+PERSONALIZATION:
+${profileBlock}
+
+When you learn something NEW about ${name} (hobbies, likes/dislikes, family, job, pets, travel, home city, personality, goals…), append ONE hidden line at the very end of your response in EXACTLY this format:
+<note>fact 1 | fact 2</note>
+- Short factual phrases only (under 60 chars each, in English, third person about ${name}).
+- Only include genuinely NEW info not already listed above.
+- If nothing new this turn, omit the <note> tag entirely.
+- Never mention the note or its contents out loud.
 
 CURRICULUM: ${CURRICULUM_SUMMARY}
 
@@ -316,7 +360,7 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  const { messages, name } = req.body || {};
+  const { messages, name, profile } = req.body || {};
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: { message: 'messages must be a non-empty array' } });
   }
@@ -328,7 +372,7 @@ app.post('/api/chat', async (req, res) => {
     const { status, data } = await callAnthropic(apiKey, {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      system: buildSystemPrompt(name, isOpening),
+      system: buildSystemPrompt(name, isOpening, profile),
       messages: trimmedMessages
     });
 
