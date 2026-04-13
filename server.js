@@ -34,14 +34,51 @@ function sanitizeName(raw) {
   return name;
 }
 
-function buildSystemPrompt(rawName) {
+// A rotation of A1-friendly opening angles. The server picks one at random
+// for each new session so the teacher doesn't always ask the same thing.
+const OPENING_TOPICS = [
+  { topic: 'their day so far', hint: 'Comment ça va aujourd\'hui ? / Comment se passe ta journée ?' },
+  { topic: 'how they are feeling right now', hint: 'Ça va ? Tu te sens comment ?' },
+  { topic: 'what they ate for breakfast or their last meal', hint: 'Qu\'est-ce que tu as mangé ce matin ?' },
+  { topic: 'the weather where they are', hint: 'Quel temps fait-il chez toi ?' },
+  { topic: 'their weekend plans or what they did last weekend', hint: 'Qu\'est-ce que tu fais ce week-end ?' },
+  { topic: 'their favorite hobby or something they enjoy doing', hint: 'Quel est ton passe-temps préféré ?' },
+  { topic: 'their family — siblings, parents, or pets', hint: 'Tu as des frères et sœurs ?' },
+  { topic: 'where they live — city, country, or type of home', hint: 'Où est-ce que tu habites ?' },
+  { topic: 'a favorite food or drink', hint: 'Quelle est ta boisson préférée ?' },
+  { topic: 'how they got to where they are (transport)', hint: 'Comment tu es venu(e) ici aujourd\'hui ?' },
+  { topic: 'their work or studies', hint: 'Qu\'est-ce que tu fais dans la vie ?' },
+  { topic: 'a movie, show, or book they like', hint: 'Tu as un film préféré ?' },
+  { topic: 'a place they would like to visit', hint: 'Où est-ce que tu voudrais voyager ?' },
+  { topic: 'their morning routine', hint: 'À quelle heure tu te lèves le matin ?' },
+  { topic: 'their plans for this evening', hint: 'Qu\'est-ce que tu fais ce soir ?' }
+];
+
+const GREETINGS = ['Bonjour', 'Salut', 'Coucou', 'Hé'];
+
+function pickRandom(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+// `isOpening` is true when this is the very first turn of a new session.
+// We only randomize the opener for that turn — once the conversation is
+// under way, Claude picks the next topic naturally from its rotation.
+function buildSystemPrompt(rawName, isOpening) {
   const name = sanitizeName(rawName) || 'the student';
+  const opening = pickRandom(OPENING_TOPICS);
+  const greeting = pickRandom(GREETINGS);
+
+  const openingBlock = isOpening
+    ? `START: Greet ${name} warmly in French by name using "${greeting} ${name} !" (or a similar warm variation — vary it each session) and ask ONE simple opening question about ${opening.topic}. For inspiration only, something in the spirit of: "${opening.hint}". Pick your own wording — do not copy the example verbatim. Keep the whole opening to 1–2 short sentences and friendly.`
+    : `START: Greet ${name} warmly in French by name and ask one simple opening question. Keep it short and friendly.`;
+
   return `You are a warm, encouraging French teacher helping an A1-level beginner named ${name} practice conversational French. Address them by their name (${name}) naturally throughout the conversation — in greetings, encouragement, and questions.
 
 CONVERSATION RULES:
 - Ask ONE simple French question per turn (A1 level vocabulary only)
 - After the student replies, give feedback then ask the next question
 - Rotate through topics: daily routines, food, family, hobbies, weather, shopping, transport, work, home, health
+- Vary your phrasing and openers from session to session — don't always start with the same question
 
 FEEDBACK FORMAT after each student reply:
 Write a short warm reaction in English first.
@@ -68,7 +105,7 @@ IMPORTANT:
 - Simple English explanations only
 - Be warm and playful
 
-START: Greet ${name} warmly in French by name (e.g. "Bonjour ${name} !") and ask one simple opening question about their day. Keep it short and friendly.`;
+${openingBlock}`;
 }
 
 // POST JSON to the Anthropic Messages API using Node's built-in https module,
@@ -147,11 +184,13 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: { message: 'messages must be a non-empty array' } });
   }
 
+  const isOpening = messages.length === 1;
+
   try {
     const { status, data } = await callAnthropic(apiKey, {
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
-      system: buildSystemPrompt(name),
+      system: buildSystemPrompt(name, isOpening),
       messages
     });
 
