@@ -318,9 +318,151 @@
         border-radius: 10px;
         align-self: center;
       }
+
+      .gate {
+        position: fixed;
+        inset: 0;
+        background: rgba(26, 26, 46, 0.94);
+        backdrop-filter: blur(6px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+        padding: 20px;
+      }
+
+      .gate.hidden {
+        display: none;
+      }
+
+      .gate-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 28px 24px 26px;
+        width: 100%;
+        max-width: 380px;
+        text-align: center;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .gate-card h2 {
+        font-family: 'Playfair Display', serif;
+        font-weight: 700;
+        margin: 0;
+        color: var(--gold);
+        font-size: 26px;
+      }
+
+      .gate-card h2 .accent {
+        color: var(--coral);
+        font-style: italic;
+      }
+
+      .gate-card p {
+        color: var(--muted);
+        font-size: 14px;
+        margin: 0 0 10px;
+      }
+
+      .gate-card .field {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        text-align: left;
+      }
+
+      .gate-card label {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .gate-card input {
+        width: 100%;
+        display: block;
+        box-sizing: border-box;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-family: inherit;
+        font-size: 15px;
+        outline: none;
+        transition: border-color 0.15s ease;
+      }
+
+      .gate-card input:focus {
+        border-color: rgba(245, 200, 66, 0.5);
+      }
+
+      .gate-card button {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 6px;
+        background: var(--gold);
+        color: #1a1a2e;
+        border: none;
+        border-radius: 12px;
+        padding: 12px;
+        font-weight: 700;
+        font-family: inherit;
+        font-size: 14px;
+        letter-spacing: 0.3px;
+        cursor: pointer;
+      }
+
+      .gate-card button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .gate-error {
+        color: var(--coral);
+        font-size: 13px;
+        margin-top: 10px;
+        min-height: 18px;
+      }
     </style>
   </head>
   <body>
+    <div class="gate hidden" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+      <form class="gate-card" id="gateForm" autocomplete="off">
+        <h2 id="gateTitle">Ooh La <span class="accent">Langue</span></h2>
+        <p>Enter your name and the password to start practicing.</p>
+        <div class="field">
+          <label for="gateName">Your name</label>
+          <input
+            type="text"
+            id="gateName"
+            placeholder="e.g. Kate"
+            autocomplete="given-name"
+            maxlength="40"
+            required
+          />
+        </div>
+        <div class="field">
+          <label for="gatePassword">Password</label>
+          <input
+            type="password"
+            id="gatePassword"
+            placeholder="Password"
+            autocomplete="current-password"
+            required
+          />
+        </div>
+        <button type="submit" id="gateSubmit">Enter</button>
+        <div class="gate-error" id="gateError" aria-live="polite"></div>
+      </form>
+    </div>
+
     <div class="app">
       <header>
         <h1 class="logo">Ooh La <span class="accent">Langue</span></h1>
@@ -351,6 +493,125 @@
 
       const history = [];
       let busy = false;
+
+      // ---- Password + name gate ----
+      const gateEl = document.getElementById('gate');
+      const gateForm = document.getElementById('gateForm');
+      const gateName = document.getElementById('gateName');
+      const gatePassword = document.getElementById('gatePassword');
+      const gatePasswordField = gatePassword.closest('.field');
+      const gateIntro = gateEl.querySelector('p');
+      const gateSubmit = document.getElementById('gateSubmit');
+      const gateError = document.getElementById('gateError');
+      const PASSWORD_KEY = 'oohlalangue_password';
+      const NAME_KEY = 'oohlalangue_name';
+      let passwordRequired = false;
+
+      function configureGateForRequirement(required) {
+        passwordRequired = required;
+        gatePasswordField.style.display = required ? '' : 'none';
+        gatePassword.required = required;
+        gateIntro.textContent = required
+          ? 'Enter your name and the password to start practicing.'
+          : 'What should we call you?';
+      }
+
+      function getStoredPassword() {
+        try { return localStorage.getItem(PASSWORD_KEY) || ''; } catch (_e) { return ''; }
+      }
+      function setStoredPassword(v) {
+        try { v ? localStorage.setItem(PASSWORD_KEY, v) : localStorage.removeItem(PASSWORD_KEY); } catch (_e) {}
+      }
+      function getStoredName() {
+        try { return localStorage.getItem(NAME_KEY) || ''; } catch (_e) { return ''; }
+      }
+      function setStoredName(v) {
+        try { v ? localStorage.setItem(NAME_KEY, v) : localStorage.removeItem(NAME_KEY); } catch (_e) {}
+      }
+
+      function authHeaders() {
+        const pw = getStoredPassword();
+        return pw ? { 'x-app-password': pw } : {};
+      }
+
+      function showGate(errorText) {
+        gateEl.classList.remove('hidden');
+        gateError.textContent = errorText || '';
+        gatePassword.value = '';
+        gateName.value = getStoredName();
+        setTimeout(() => (gateName.value ? gatePassword : gateName).focus(), 50);
+      }
+      function hideGate() {
+        gateEl.classList.add('hidden');
+        gateError.textContent = '';
+      }
+
+      async function verifyPassword(pw) {
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
+          body: JSON.stringify({})
+        });
+        return res.ok;
+      }
+
+      gateForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = gateName.value.trim().slice(0, 40);
+        const pw = gatePassword.value.trim();
+        if (!name) return;
+        if (passwordRequired && !pw) return;
+        gateSubmit.disabled = true;
+        gateError.textContent = '';
+        try {
+          if (passwordRequired) {
+            const ok = await verifyPassword(pw);
+            if (!ok) {
+              showGate('Incorrect password');
+              return;
+            }
+            setStoredPassword(pw);
+          }
+          setStoredName(name);
+          hideGate();
+          // Start the conversation now that we're authenticated and named.
+          send('Start!', { display: false });
+        } catch (err) {
+          showGate('Network error: ' + (err && err.message ? err.message : err));
+        } finally {
+          gateSubmit.disabled = false;
+        }
+      });
+
+      async function bootstrapAuth() {
+        let required = false;
+        try {
+          const res = await fetch('/api/auth');
+          const data = await res.json();
+          required = Boolean(data && data.required);
+        } catch (_e) {
+          // If we can't reach the server, fall through and let /api/chat fail visibly.
+        }
+
+        configureGateForRequirement(required);
+
+        // We always need a name to personalize the conversation.
+        const haveName = Boolean(getStoredName());
+        const havePassword = Boolean(getStoredPassword());
+
+        if (!required && haveName) {
+          send('Start!', { display: false });
+          return;
+        }
+
+        if (required && haveName && havePassword && (await verifyPassword(getStoredPassword()))) {
+          send('Start!', { display: false });
+          return;
+        }
+
+        if (!havePassword) setStoredPassword('');
+        showGate();
+      }
 
       function scrollToBottom() {
         chatEl.scrollTop = chatEl.scrollHeight;
@@ -539,11 +800,18 @@
         try {
           const res = await fetch('/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: history })
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ messages: history, name: getStoredName() })
           });
           const data = await res.json();
           removeTyping();
+
+          if (res.status === 401) {
+            setStoredPassword('');
+            history.pop();
+            showGate('Session expired — please re-enter the password');
+            return;
+          }
 
           if (!res.ok) {
             const msg = (data && (data.error?.message || data.error)) || 'Request failed';
@@ -589,8 +857,9 @@
       }
       input.addEventListener('input', autoresize);
 
-      // Kick off: trigger the teacher's opening greeting.
-      send('Start!', { display: false });
+      // Check whether a password is required, prompt if so, then kick off
+      // the teacher's opening greeting.
+      bootstrapAuth();
     </script>
   </body>
 </html>
