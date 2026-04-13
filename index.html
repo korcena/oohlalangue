@@ -339,17 +339,20 @@
         background: var(--panel);
         border: 1px solid var(--border);
         border-radius: 18px;
-        padding: 28px 26px;
+        padding: 28px 24px 26px;
         width: 100%;
-        max-width: 360px;
+        max-width: 380px;
         text-align: center;
         box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
       }
 
       .gate-card h2 {
         font-family: 'Playfair Display', serif;
         font-weight: 700;
-        margin: 0 0 4px;
+        margin: 0;
         color: var(--gold);
         font-size: 26px;
       }
@@ -362,11 +365,29 @@
       .gate-card p {
         color: var(--muted);
         font-size: 14px;
-        margin: 0 0 18px;
+        margin: 0 0 10px;
+      }
+
+      .gate-card .field {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        text-align: left;
+      }
+
+      .gate-card label {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--muted);
       }
 
       .gate-card input {
         width: 100%;
+        display: block;
+        box-sizing: border-box;
         background: var(--panel-2);
         border: 1px solid var(--border);
         color: var(--text);
@@ -384,7 +405,8 @@
 
       .gate-card button {
         width: 100%;
-        margin-top: 12px;
+        box-sizing: border-box;
+        margin-top: 6px;
         background: var(--gold);
         color: #1a1a2e;
         border: none;
@@ -414,14 +436,28 @@
     <div class="gate hidden" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
       <form class="gate-card" id="gateForm" autocomplete="off">
         <h2 id="gateTitle">Ooh La <span class="accent">Langue</span></h2>
-        <p>Enter the password to start practicing.</p>
-        <input
-          type="password"
-          id="gatePassword"
-          placeholder="Password"
-          autocomplete="current-password"
-          required
-        />
+        <p>Enter your name and the password to start practicing.</p>
+        <div class="field">
+          <label for="gateName">Your name</label>
+          <input
+            type="text"
+            id="gateName"
+            placeholder="e.g. Kate"
+            autocomplete="given-name"
+            maxlength="40"
+            required
+          />
+        </div>
+        <div class="field">
+          <label for="gatePassword">Password</label>
+          <input
+            type="password"
+            id="gatePassword"
+            placeholder="Password"
+            autocomplete="current-password"
+            required
+          />
+        </div>
         <button type="submit" id="gateSubmit">Enter</button>
         <div class="gate-error" id="gateError" aria-live="polite"></div>
       </form>
@@ -458,26 +494,39 @@
       const history = [];
       let busy = false;
 
-      // ---- Password gate ----
+      // ---- Password + name gate ----
       const gateEl = document.getElementById('gate');
       const gateForm = document.getElementById('gateForm');
-      const gateInput = document.getElementById('gatePassword');
+      const gateName = document.getElementById('gateName');
+      const gatePassword = document.getElementById('gatePassword');
+      const gatePasswordField = gatePassword.closest('.field');
+      const gateIntro = gateEl.querySelector('p');
       const gateSubmit = document.getElementById('gateSubmit');
       const gateError = document.getElementById('gateError');
       const PASSWORD_KEY = 'oohlalangue_password';
+      const NAME_KEY = 'oohlalangue_name';
+      let passwordRequired = false;
+
+      function configureGateForRequirement(required) {
+        passwordRequired = required;
+        gatePasswordField.style.display = required ? '' : 'none';
+        gatePassword.required = required;
+        gateIntro.textContent = required
+          ? 'Enter your name and the password to start practicing.'
+          : 'What should we call you?';
+      }
 
       function getStoredPassword() {
-        try {
-          return localStorage.getItem(PASSWORD_KEY) || '';
-        } catch (_e) {
-          return '';
-        }
+        try { return localStorage.getItem(PASSWORD_KEY) || ''; } catch (_e) { return ''; }
       }
       function setStoredPassword(v) {
-        try {
-          if (v) localStorage.setItem(PASSWORD_KEY, v);
-          else localStorage.removeItem(PASSWORD_KEY);
-        } catch (_e) {}
+        try { v ? localStorage.setItem(PASSWORD_KEY, v) : localStorage.removeItem(PASSWORD_KEY); } catch (_e) {}
+      }
+      function getStoredName() {
+        try { return localStorage.getItem(NAME_KEY) || ''; } catch (_e) { return ''; }
+      }
+      function setStoredName(v) {
+        try { v ? localStorage.setItem(NAME_KEY, v) : localStorage.removeItem(NAME_KEY); } catch (_e) {}
       }
 
       function authHeaders() {
@@ -488,8 +537,9 @@
       function showGate(errorText) {
         gateEl.classList.remove('hidden');
         gateError.textContent = errorText || '';
-        gateInput.value = '';
-        setTimeout(() => gateInput.focus(), 50);
+        gatePassword.value = '';
+        gateName.value = getStoredName();
+        setTimeout(() => (gateName.value ? gatePassword : gateName).focus(), 50);
       }
       function hideGate() {
         gateEl.classList.add('hidden');
@@ -507,19 +557,24 @@
 
       gateForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const pw = gateInput.value.trim();
-        if (!pw) return;
+        const name = gateName.value.trim().slice(0, 40);
+        const pw = gatePassword.value.trim();
+        if (!name) return;
+        if (passwordRequired && !pw) return;
         gateSubmit.disabled = true;
         gateError.textContent = '';
         try {
-          const ok = await verifyPassword(pw);
-          if (!ok) {
-            showGate('Incorrect password');
-            return;
+          if (passwordRequired) {
+            const ok = await verifyPassword(pw);
+            if (!ok) {
+              showGate('Incorrect password');
+              return;
+            }
+            setStoredPassword(pw);
           }
-          setStoredPassword(pw);
+          setStoredName(name);
           hideGate();
-          // Start the conversation now that we're authenticated.
+          // Start the conversation now that we're authenticated and named.
           send('Start!', { display: false });
         } catch (err) {
           showGate('Network error: ' + (err && err.message ? err.message : err));
@@ -538,18 +593,24 @@
           // If we can't reach the server, fall through and let /api/chat fail visibly.
         }
 
-        if (!required) {
+        configureGateForRequirement(required);
+
+        // We always need a name to personalize the conversation.
+        const haveName = Boolean(getStoredName());
+        const havePassword = Boolean(getStoredPassword());
+
+        if (!required && haveName) {
           send('Start!', { display: false });
           return;
         }
 
-        const stored = getStoredPassword();
-        if (stored && (await verifyPassword(stored))) {
+        if (required && haveName && havePassword && (await verifyPassword(getStoredPassword()))) {
           send('Start!', { display: false });
-        } else {
-          setStoredPassword('');
-          showGate();
+          return;
         }
+
+        if (!havePassword) setStoredPassword('');
+        showGate();
       }
 
       function scrollToBottom() {
@@ -740,7 +801,7 @@
           const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
-            body: JSON.stringify({ messages: history })
+            body: JSON.stringify({ messages: history, name: getStoredName() })
           });
           const data = await res.json();
           removeTyping();

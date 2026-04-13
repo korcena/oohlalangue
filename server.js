@@ -23,7 +23,20 @@ function checkPassword(req) {
   return supplied && safeEqual(supplied, APP_PASSWORD);
 }
 
-const SYSTEM_PROMPT = `You are a warm, encouraging French teacher helping an A1-level beginner named Kate practice conversational French.
+// Keep the student's name safe for a system-prompt interpolation: trim,
+// drop control characters, strip anything that looks like prompt-injection
+// markup, and cap the length.
+function sanitizeName(raw) {
+  if (typeof raw !== 'string') return '';
+  let name = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  name = name.replace(/[`<>{}\[\]"]/g, '');
+  if (name.length > 40) name = name.slice(0, 40).trim();
+  return name;
+}
+
+function buildSystemPrompt(rawName) {
+  const name = sanitizeName(rawName) || 'the student';
+  return `You are a warm, encouraging French teacher helping an A1-level beginner named ${name} practice conversational French. Address them by their name (${name}) naturally throughout the conversation — in greetings, encouragement, and questions.
 
 CONVERSATION RULES:
 - Ask ONE simple French question per turn (A1 level vocabulary only)
@@ -55,7 +68,8 @@ IMPORTANT:
 - Simple English explanations only
 - Be warm and playful
 
-START: Greet Kate warmly in French and ask one simple opening question about her day. Keep it short and friendly.`;
+START: Greet ${name} warmly in French by name (e.g. "Bonjour ${name} !") and ask one simple opening question about their day. Keep it short and friendly.`;
+}
 
 // POST JSON to the Anthropic Messages API using Node's built-in https module,
 // so the server works on any Node version (no dependency on global fetch).
@@ -128,7 +142,7 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  const { messages } = req.body || {};
+  const { messages, name } = req.body || {};
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: { message: 'messages must be a non-empty array' } });
   }
@@ -137,7 +151,7 @@ app.post('/api/chat', async (req, res) => {
     const { status, data } = await callAnthropic(apiKey, {
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(name),
       messages
     });
 
