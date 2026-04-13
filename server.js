@@ -1,11 +1,27 @@
 require('dotenv').config();
 
+const crypto = require('crypto');
 const express = require('express');
 const https = require('https');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const APP_PASSWORD = process.env.APP_PASSWORD || '';
+
+// Constant-time string compare to avoid leaking password length via timing.
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+function checkPassword(req) {
+  if (!APP_PASSWORD) return true; // gate disabled
+  const supplied = req.get('x-app-password') || (req.body && req.body.password) || '';
+  return supplied && safeEqual(supplied, APP_PASSWORD);
+}
 
 const SYSTEM_PROMPT = `You are a warm, encouraging French teacher helping an A1-level beginner named Kate practice conversational French.
 
@@ -85,7 +101,23 @@ app.use(express.static(__dirname));
 // Silence the /favicon.ico 404 in dev.
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
+// Tell the client whether a password is required (so it can show the login screen).
+app.get('/api/auth', (_req, res) => {
+  res.json({ required: Boolean(APP_PASSWORD) });
+});
+
+// Verify a submitted password. Returns 200 on success, 401 on failure.
+app.post('/api/auth', (req, res) => {
+  if (!APP_PASSWORD) return res.json({ ok: true, required: false });
+  if (checkPassword(req)) return res.json({ ok: true, required: true });
+  return res.status(401).json({ error: { message: 'Incorrect password' } });
+});
+
 app.post('/api/chat', async (req, res) => {
+  if (!checkPassword(req)) {
+    return res.status(401).json({ error: { message: 'Incorrect or missing password' } });
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return res.status(500).json({
@@ -137,6 +169,11 @@ app.listen(PORT, () => {
     console.warn(
       '[warn] ANTHROPIC_API_KEY is not set. Create a .env file (see .env.example) before sending messages.'
     );
+  }
+  if (APP_PASSWORD) {
+    console.log('[info] Password gate is ENABLED (APP_PASSWORD is set).');
+  } else {
+    console.log('[info] Password gate is DISABLED — set APP_PASSWORD in .env to require one.');
   }
   console.log(`Ooh La Langue running at http://localhost:${PORT}`);
 });
