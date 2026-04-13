@@ -2,7 +2,12 @@
   "name": "ooh-la-langue",
   "version": "1.0.0",
   "description": "French conversation practice web app powered by Claude",
+  "private": true,
+  "license": "UNLICENSED",
   "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
