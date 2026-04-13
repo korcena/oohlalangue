@@ -48,7 +48,11 @@
       .app {
         display: flex;
         flex-direction: column;
+        /* Use dynamic viewport height so the layout shrinks when the mobile
+           keyboard opens, keeping the input + latest message visible. Fall
+           back to 100vh for browsers without dvh support. */
         height: 100vh;
+        height: 100dvh;
         max-width: 820px;
         margin: 0 auto;
         padding: 20px 16px 12px;
@@ -272,7 +276,9 @@
         border-radius: 14px;
         padding: 12px 14px;
         font-family: inherit;
-        font-size: 15px;
+        /* 16px prevents iOS Safari from auto-zooming the viewport on focus,
+           which otherwise pushes the chat around when the keyboard opens. */
+        font-size: 16px;
         line-height: 1.4;
         resize: none;
         min-height: 46px;
@@ -394,7 +400,8 @@
         border-radius: 12px;
         padding: 12px 14px;
         font-family: inherit;
-        font-size: 15px;
+        /* 16px so iOS doesn't auto-zoom when focusing the gate inputs. */
+        font-size: 16px;
         outline: none;
         transition: border-color 0.15s ease;
       }
@@ -856,6 +863,23 @@
         input.style.height = Math.min(input.scrollHeight, 160) + 'px';
       }
       input.addEventListener('input', autoresize);
+
+      // Mobile keyboard handling: when the keyboard opens or the visual
+      // viewport resizes, re-pin the chat to the bottom so the teacher's
+      // latest question stays visible while the user is typing. This is a
+      // safety net for browsers that don't fully honour 100dvh.
+      function pinToBottom() {
+        // rAF + small delay so this runs after the keyboard animation.
+        requestAnimationFrame(() => {
+          setTimeout(scrollToBottom, 120);
+        });
+      }
+      input.addEventListener('focus', pinToBottom);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', pinToBottom);
+      } else {
+        window.addEventListener('resize', pinToBottom);
+      }
 
       // Check whether a password is required, prompt if so, then kick off
       // the teacher's opening greeting.
