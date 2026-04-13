@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const express = require('express');
+const https = require('https');
 const path = require('path');
 
 const app = express();
@@ -40,52 +41,90 @@ IMPORTANT:
 
 START: Greet Kate warmly in French and ask one simple opening question about her day. Keep it short and friendly.`;
 
+// POST JSON to the Anthropic Messages API using Node's built-in https module,
+// so the server works on any Node version (no dependency on global fetch).
+function callAnthropic(apiKey, payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
+    const req = https.request(
+      {
+        method: 'POST',
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        }
+      },
+      (response) => {
+        const chunks = [];
+        response.on('data', (c) => chunks.push(c));
+        response.on('end', () => {
+          const raw = Buffer.concat(chunks).toString('utf8');
+          let parsed;
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch (_e) {
+            parsed = { error: { message: raw || 'Empty response from Anthropic' } };
+          }
+          resolve({ status: response.statusCode || 500, data: parsed });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(__dirname));
+
+// Silence the /favicon.ico 404 in dev.
+app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
 app.post('/api/chat', async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set on server' });
+    return res.status(500).json({
+      error: {
+        message:
+          'ANTHROPIC_API_KEY is not set. Create a .env file with ANTHROPIC_API_KEY=sk-ant-... and restart the server.'
+      }
+    });
   }
 
   const { messages } = req.body || {};
-  if (!Array.isArray(messages)) {
-    return res.status(400).json({ error: 'messages must be an array' });
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: { message: 'messages must be a non-empty array' } });
   }
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: SYSTEM_PROMPT,
-        messages
-      })
+    const { status, data } = await callAnthropic(apiKey, {
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system: SYSTEM_PROMPT,
+      messages
     });
 
-    const data = await response.json();
-    if (!response.ok) {
-      console.error('Anthropic API error:', data);
-      return res.status(response.status).json(data);
+    if (status < 200 || status >= 300) {
+      console.error('Anthropic API error:', status, data);
+      return res.status(status).json(data);
     }
 
     const text = (data.content || [])
-      .filter((block) => block.type === 'text')
+      .filter((block) => block && block.type === 'text')
       .map((block) => block.text)
       .join('\n')
       .trim();
 
     res.json({ text, raw: data });
   } catch (err) {
-    console.error('Server error:', err);
-    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+    const message = err && err.message ? err.message : String(err);
+    console.error('Server error talking to Anthropic:', err);
+    res.status(500).json({ error: { message } });
   }
 });
 
@@ -94,5 +133,10 @@ app.get('/', (_req, res) => {
 });
 
 app.listen(PORT, () => {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn(
+      '[warn] ANTHROPIC_API_KEY is not set. Create a .env file (see .env.example) before sending messages.'
+    );
+  }
   console.log(`Ooh La Langue running at http://localhost:${PORT}`);
 });
