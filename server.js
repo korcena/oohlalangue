@@ -69,43 +69,41 @@ function buildSystemPrompt(rawName, isOpening) {
   const greeting = pickRandom(GREETINGS);
 
   const openingBlock = isOpening
-    ? `START: Greet ${name} warmly in French by name using "${greeting} ${name} !" (or a similar warm variation — vary it each session) and ask ONE simple opening question about ${opening.topic}. For inspiration only, something in the spirit of: "${opening.hint}". Pick your own wording — do not copy the example verbatim. Keep the whole opening to 1–2 short sentences and friendly.`
-    : `START: Greet ${name} warmly in French by name and ask one simple opening question. Keep it short and friendly.`;
+    ? `FIRST TURN: Greet ${name} in French with "${greeting} ${name} !" (or a similar warm variation) and ask ONE short A1 question about ${opening.topic}. Inspiration only: "${opening.hint}" — use your own wording. 1–2 sentences total.`
+    : `Keep responses short: feedback markers + one next question.`;
 
-  return `You are a warm, encouraging French teacher helping an A1-level beginner named ${name} practice conversational French. Address them by their name (${name}) naturally throughout the conversation — in greetings, encouragement, and questions.
+  return `You are a warm, playful French teacher helping ${name}, an A1 beginner, practice French. Address ${name} by name naturally.
 
-CONVERSATION RULES:
-- Ask ONE simple French question per turn (A1 level vocabulary only)
-- After the student replies, give feedback then ask the next question
-- Rotate through topics: daily routines, food, family, hobbies, weather, shopping, transport, work, home, health
-- Vary your phrasing and openers from session to session — don't always start with the same question
-
-FEEDBACK FORMAT after each student reply:
-Write a short warm reaction in English first.
-Then use these exact markers on their own lines:
-
-✅ GOOD: [what they got right]
+EACH TURN (after the first):
+1. React briefly in English (one short line).
+2. Then use these exact markers on their own lines:
+✅ GOOD: [what was right]
 🔧 FIX: [mistake] → [correct form] — [simple English explanation]
 💬 CORRECTED: [full corrected sentence]
+3. Ask ONE new simple A1 question.
 
-Then ask the next question.
-
-GRAMMAR TO WATCH:
-- Elision: je + vowel → j'
-- Verb conjugation after je (not infinitive)
-- Negation: ne...pas (both parts)
-- Gender: la/le/un/une
-- Days/months: lowercase
-- aussi: after the verb
-- En vs à for transport/time
-
-IMPORTANT:
-- Max 2 corrections per turn
-- If answer is fully correct, celebrate warmly and skip the FIX section
-- Simple English explanations only
-- Be warm and playful
+RULES:
+- A1 vocabulary only.
+- Rotate topics: daily routines, food, family, hobbies, weather, shopping, transport, work, home, health.
+- Max 2 FIX lines per turn. If the reply is fully correct, celebrate and skip FIX.
+- Watch: elision (j'), je + conjugated verb (not infinitive), ne…pas, gender (le/la/un/une), lowercase days/months, "aussi" after the verb, en vs à.
+- Simple English explanations only.
+- Vary your phrasing between sessions.
 
 ${openingBlock}`;
+}
+
+// Keep conversation cost bounded on long sessions. We always preserve the
+// original "Start!" kickoff as the first turn, then keep the most recent
+// `keep` messages after that, trimming from the middle. The Messages API
+// requires the sequence to start with a user turn, so we drop a leading
+// assistant message if one ends up first after slicing.
+function trimHistory(messages, keep = 20) {
+  if (!Array.isArray(messages) || messages.length <= keep + 1) return messages;
+  const first = messages[0];
+  let tail = messages.slice(-keep);
+  while (tail.length && tail[0].role !== 'user') tail = tail.slice(1);
+  return [first, ...tail];
 }
 
 // POST JSON to the Anthropic Messages API using Node's built-in https module,
@@ -185,13 +183,14 @@ app.post('/api/chat', async (req, res) => {
   }
 
   const isOpening = messages.length === 1;
+  const trimmedMessages = trimHistory(messages, 20);
 
   try {
     const { status, data } = await callAnthropic(apiKey, {
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
       system: buildSystemPrompt(name, isOpening),
-      messages
+      messages: trimmedMessages
     });
 
     if (status < 200 || status >= 300) {
