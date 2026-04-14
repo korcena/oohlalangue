@@ -115,16 +115,26 @@
 
       #chat {
         flex: 1;
+        /* min-height: 0 lets this flex child shrink below its content size,
+           which is what actually allows the inner overflow-y: auto to kick
+           in on mobile WebKit. Without it, long correction cards push the
+           composer off-screen and the top of the chat becomes unreachable. */
+        min-height: 0;
         overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         padding: 20px 4px;
         display: flex;
         flex-direction: column;
         gap: 14px;
         scroll-behavior: smooth;
-        /* With only a couple of messages, push them toward the input so
-           the latest question always sits just above the keyboard rather
-           than floating at the top of a tall empty chat area. */
-        justify-content: flex-end;
+      }
+
+      /* With only a couple of messages, push them toward the composer so the
+         latest question sits just above the keyboard. Using margin-top: auto
+         on the first row (instead of justify-content: flex-end on the flex
+         container) preserves normal scrollback when content overflows. */
+      #chat > :first-child {
+        margin-top: auto;
       }
 
       #chat::-webkit-scrollbar {
@@ -468,53 +478,52 @@
         min-height: 18px;
       }
 
-      /* Pause overlay shown after every 5 answers. Reuses the .gate layout
-         for centering. */
-      .pause-card {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 18px;
-        padding: 32px 28px 28px;
-        width: 100%;
-        max-width: 420px;
-        margin: 0 auto;
-        text-align: center;
-        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+      /* Inline pause panel — replaces the composer (input + send) after the
+         student hits the 5-answer limit. The chat stays fully visible and
+         scrollable so they can re-read the corrections while the timer
+         counts down. */
+      .pause-inline {
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        align-items: center;
+        gap: 4px;
+        padding: 14px 16px 10px;
+        border-top: 1px solid var(--border);
+        text-align: center;
       }
 
-      .pause-card h2 {
+      .pause-inline.hidden {
+        display: none;
+      }
+
+      .pause-inline-title {
         font-family: 'Playfair Display', serif;
         font-weight: 700;
-        margin: 0;
         color: var(--gold);
-        font-size: 26px;
-      }
-
-      .pause-card p {
-        color: var(--muted);
-        font-size: 14px;
+        font-size: 16px;
         margin: 0;
-        line-height: 1.5;
       }
 
       .pause-timer {
         font-family: 'Playfair Display', serif;
-        font-size: 44px;
+        font-size: 32px;
         font-weight: 700;
         color: var(--coral);
         letter-spacing: 2px;
         font-variant-numeric: tabular-nums;
-        margin: 6px 0 4px;
+        margin: 2px 0;
       }
 
       .pause-sub {
         font-size: 12px;
         color: var(--muted);
-        letter-spacing: 0.4px;
-        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        line-height: 1.4;
+        max-width: 360px;
+      }
+
+      form.hidden {
+        display: none;
       }
 
       /* Tiny pill shown near the header so the student always knows how
@@ -563,18 +572,6 @@
       </form>
     </div>
 
-    <div class="gate hidden" id="pause" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
-      <div class="pause-card">
-        <h2 id="pauseTitle">À tout à l'heure&nbsp;!</h2>
-        <p>
-          You've completed 5 answers. Take a break — come back soon to keep
-          learning. Your progress is saved.
-        </p>
-        <div class="pause-timer" id="pauseTimer">03:00:00</div>
-        <div class="pause-sub">until next session</div>
-      </div>
-    </div>
-
     <div class="app">
       <header>
         <h1 class="logo">Ooh La <span class="accent">Langue</span></h1>
@@ -596,6 +593,15 @@
         ></textarea>
         <button type="submit" class="send" id="sendBtn">Envoyer</button>
       </form>
+
+      <div class="pause-inline hidden" id="pause" role="status" aria-live="polite">
+        <p class="pause-inline-title">À tout à l'heure&nbsp;!</p>
+        <div class="pause-timer" id="pauseTimer">03:00:00</div>
+        <p class="pause-sub">
+          Session limit reached. Review the corrections above — your input
+          returns when the timer ends.
+        </p>
+      </div>
     </div>
 
     <script>
@@ -658,20 +664,31 @@
 
       function updateSessionCounter() {
         if (!sessionCounterEl) return;
+        // Hide while a pause is active — the inline pause panel already
+        // shows a live timer, no need to duplicate the info in the header.
+        if (getPauseUntil() > Date.now()) {
+          sessionCounterEl.innerHTML = '';
+          return;
+        }
         const remaining = Math.max(0, ANSWERS_PER_WINDOW - getAnswers());
         sessionCounterEl.innerHTML =
-          remaining > 0
+          remaining > 0 && remaining < ANSWERS_PER_WINDOW
             ? `<strong>${remaining}</strong> answer${remaining === 1 ? '' : 's'} left in this session`
             : '';
       }
 
       function showPause() {
         pauseEl.classList.remove('hidden');
+        form.classList.add('hidden');
         sendBtn.disabled = true;
         input.disabled = true;
+        // Scroll the last teacher correction into view so the student can
+        // read it while the timer ticks.
+        scrollToBottom();
       }
       function hidePause() {
         pauseEl.classList.add('hidden');
+        form.classList.remove('hidden');
         sendBtn.disabled = false;
         input.disabled = false;
       }
@@ -682,10 +699,16 @@
         setAnswers(0);
         updateSessionCounter();
         hidePause();
-        // Refreshes ditch in-memory chat history; reload so the normal boot
-        // path (auth check + "Start!" kickoff) fires cleanly. This also
-        // resets the per-session focus module for a fresh feel.
-        try { location.reload(); } catch (_e) {}
+        // If we have an in-memory conversation, just unlock the composer —
+        // the student can type whatever they want next and the teacher will
+        // correct + ask a fresh question. If history is empty (they sat
+        // through the whole pause with a refresh, losing memory), kick off
+        // a new greeting so they aren't staring at a blank chat.
+        if (history.length === 0) {
+          send('Start!', { display: false });
+        } else {
+          try { input.focus(); } catch (_e) {}
+        }
       }
 
       // Returns true if we're currently paused (and arms the UI).
@@ -1064,6 +1087,12 @@
         history.push({ role: 'user', content: userText });
         showTyping();
 
+        // If this send is the 5th (and final) answer of the current window,
+        // tell the server to correct but NOT ask a new question — otherwise
+        // the teacher would spin up a question the student gets locked out
+        // of for 3 hours.
+        const willTriggerPause = display && getAnswers() + 1 >= ANSWERS_PER_WINDOW;
+
         try {
           const res = await fetch('/api/chat', {
             method: 'POST',
@@ -1071,7 +1100,8 @@
             body: JSON.stringify({
               messages: history,
               name: getStoredName(),
-              profile: getProfile()
+              profile: getProfile(),
+              skipQuestion: willTriggerPause
             })
           });
           const data = await res.json();
