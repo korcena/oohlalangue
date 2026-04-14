@@ -225,24 +225,31 @@ function sanitizeProfile(raw) {
 }
 
 // `isOpening` is true when this is the very first turn of a new session.
-// We pick ONE curriculum module to focus the session on, so the student
-// actually practices concrete A1 grammar/vocab instead of generic chatter.
-// `profile` is an array of short facts the client has learned about the
-// student across sessions; we surface them in the prompt so questions feel
-// personal rather than generic.
-function buildSystemPrompt(rawName, isOpening, profile) {
+// `skipQuestion` is true on the final answer before a scheduled pause — the
+// teacher corrects the answer but does NOT ask a new question that the
+// student would be locked out of for 3 hours.
+function buildSystemPrompt(rawName, isOpening, profile, skipQuestion) {
   const name = sanitizeName(rawName) || 'the student';
   const mod = pickRandom(CURRICULUM_MODULES);
   const greeting = pickRandom(GREETINGS);
 
-  const openingBlock = isOpening
-    ? `FIRST TURN: Greet ${name} in French with "${greeting} ${name} !" (or a similar warm variation) and ask ONE short A1 question that exercises "${mod.module}" — ${mod.focus}. Inspiration (do NOT copy verbatim): "${mod.hint}". 1–2 sentences total.`
-    : `Today's focus module is "${mod.module}" (${mod.focus}). When picking the next question, prefer one that exercises this area, but stay natural — drift to neighbouring modules if the conversation calls for it.`;
+  let openingBlock;
+  if (skipQuestion) {
+    openingBlock = `THIS IS THE FINAL ANSWER OF THE CURRENT SESSION. After your correction block, do NOT ask a new question. Instead add ONE short warm English line telling ${name} they've reached the 5-answer session limit and can come back in a bit — invite them to review the corrections above while they wait.`;
+  } else if (isOpening) {
+    openingBlock = `FIRST TURN: Greet ${name} in French with "${greeting} ${name} !" (or a similar warm variation) and ask ONE short A1 question that exercises "${mod.module}" — ${mod.focus}. Inspiration (do NOT copy verbatim): "${mod.hint}". 1–2 sentences total.`;
+  } else {
+    openingBlock = `Today's focus module is "${mod.module}" (${mod.focus}). When picking the next question, prefer one that exercises this area, but stay natural — drift to neighbouring modules if the conversation calls for it.`;
+  }
 
   const facts = sanitizeProfile(profile);
   const profileBlock = facts.length
     ? `KNOWN ABOUT ${name.toUpperCase()} (use these to personalize questions; reference them naturally):\n- ${facts.join('\n- ')}`
     : `KNOWN ABOUT ${name.toUpperCase()}: (nothing yet — ask light questions to get to know them)`;
+
+  const questionStep = skipQuestion
+    ? `3. Do NOT ask a new question this turn.`
+    : `3. Ask ONE new simple A1 question — personalize it with what you know about ${name} when relevant.`;
 
   return `You are a warm, playful French teacher helping ${name}, an A1 beginner, practice French. Address ${name} by name naturally.
 
@@ -252,12 +259,16 @@ EACH TURN (after the first):
 ✅ GOOD: [what was right]
 🔧 FIX: [mistake] → [correct form] — [simple English explanation]
 💬 CORRECTED: [full corrected sentence]
-3. Ask ONE new simple A1 question — personalize it with what you know about ${name} when relevant.
+${questionStep}
 
 RULES:
 - A1 vocabulary only.
 - Max 2 FIX lines per turn. If the reply is fully correct, celebrate and skip FIX.
 - Watch: elision (j'), je + conjugated verb (not infinitive), ne…pas, gender (le/la/un/une), lowercase days/months, "aussi" after the verb, en/au/aux, à+le=au, de+le=du.
+- ENGLISH WORDS: when ${name} uses an English word or phrase (because they don't know the French), DO NOT reject it. Treat it as a translation request:
+  - In the 💬 CORRECTED line, write the full sentence with the English word replaced by its natural French equivalent.
+  - Add a 🔧 FIX line in the form: "[english word/phrase] → [french translation] — [one-line usage tip or tiny example in French]".
+  - Be encouraging; this is how they grow their vocabulary.
 - Simple English explanations only.
 - Vary your phrasing between sessions.
 
@@ -360,7 +371,7 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  const { messages, name, profile } = req.body || {};
+  const { messages, name, profile, skipQuestion } = req.body || {};
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: { message: 'messages must be a non-empty array' } });
   }
@@ -372,7 +383,7 @@ app.post('/api/chat', async (req, res) => {
     const { status, data } = await callAnthropic(apiKey, {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      system: buildSystemPrompt(name, isOpening, profile),
+      system: buildSystemPrompt(name, isOpening, profile, Boolean(skipQuestion)),
       messages: trimmedMessages
     });
 
