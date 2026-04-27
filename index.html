@@ -343,6 +343,70 @@
         cursor: not-allowed;
       }
 
+      button.mic {
+        background: var(--panel-2);
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        width: 46px;
+        height: 46px;
+        font-size: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        padding: 0;
+      }
+
+      button.mic:hover:not(:disabled) {
+        background: var(--panel);
+        border-color: rgba(245, 200, 66, 0.4);
+      }
+
+      button.mic:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
+      button.mic.listening {
+        background: rgba(255, 140, 105, 0.15);
+        border-color: var(--coral);
+        color: var(--coral);
+        box-shadow: 0 0 0 3px rgba(255, 140, 105, 0.2);
+        animation: pulse-mic 1.5s ease-in-out infinite;
+      }
+
+      @keyframes pulse-mic {
+        0%, 100% { box-shadow: 0 0 0 3px rgba(255, 140, 105, 0.2); }
+        50% { box-shadow: 0 0 0 8px rgba(255, 140, 105, 0.08); }
+      }
+
+      button.mic.no-support {
+        display: none;
+      }
+
+      .voice-counter {
+        font-size: 11px;
+        letter-spacing: 0.4px;
+        color: var(--muted);
+      }
+      .voice-counter strong {
+        color: var(--coral);
+        font-weight: 600;
+      }
+
+      .correction .sayit {
+        background: rgba(160, 160, 184, 0.08);
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      form.hidden {
+        display: none;
+      }
+
       .error {
         color: var(--coral);
         font-size: 13px;
@@ -581,6 +645,7 @@
           <span class="badge">A1 · Débutant</span>
         </div>
         <div class="session-counter" id="sessionCounter" aria-live="polite"></div>
+        <div class="voice-counter" id="voiceCounter" aria-live="polite"></div>
       </header>
 
       <div id="chat" aria-live="polite"></div>
@@ -592,6 +657,7 @@
           rows="1"
           autocomplete="off"
         ></textarea>
+        <button type="button" class="mic" id="micBtn" title="Speak your answer">🎤</button>
         <button type="submit" class="send" id="sendBtn">Envoyer</button>
       </form>
 
@@ -610,9 +676,12 @@
       const form = document.getElementById('form');
       const input = document.getElementById('input');
       const sendBtn = document.getElementById('sendBtn');
+      const micBtn = document.getElementById('micBtn');
+      const voiceCounterEl = document.getElementById('voiceCounter');
 
       const history = [];
       let busy = false;
+      let lastInputWasVoice = false;
 
       // ---- Password + name gate ----
       const gateEl = document.getElementById('gate');
@@ -682,15 +751,15 @@
         pauseEl.classList.remove('hidden');
         form.classList.add('hidden');
         sendBtn.disabled = true;
+        micBtn.disabled = true;
         input.disabled = true;
-        // Scroll the last teacher correction into view so the student can
-        // read it while the timer ticks.
         scrollToBottom();
       }
       function hidePause() {
         pauseEl.classList.add('hidden');
         form.classList.remove('hidden');
         sendBtn.disabled = false;
+        micBtn.disabled = voiceLimitReached();
         input.disabled = false;
       }
 
@@ -791,6 +860,127 @@
         return { visible, facts };
       }
 
+      // ---- Voice / Speech (browser-native APIs, zero cost) ----
+      const VOICE_ANSWERS_KEY = 'oohlalangue_voice_answers';
+      const VOICE_DATE_KEY = 'oohlalangue_voice_date';
+      const VOICE_LIMIT = 5;
+      const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+      let recognition = null;
+      let isListening = false;
+
+      if (!SpeechRecognitionAPI) micBtn.classList.add('no-support');
+
+      function todayStr() { return new Date().toISOString().slice(0, 10); }
+
+      function getVoiceAnswers() {
+        try {
+          const d = localStorage.getItem(VOICE_DATE_KEY) || '';
+          if (d !== todayStr()) {
+            localStorage.setItem(VOICE_DATE_KEY, todayStr());
+            localStorage.setItem(VOICE_ANSWERS_KEY, '0');
+            return 0;
+          }
+          return parseInt(localStorage.getItem(VOICE_ANSWERS_KEY) || '0', 10) || 0;
+        } catch (_e) { return 0; }
+      }
+
+      function recordVoiceAnswer() {
+        try {
+          localStorage.setItem(VOICE_DATE_KEY, todayStr());
+          const n = getVoiceAnswers() + 1;
+          localStorage.setItem(VOICE_ANSWERS_KEY, String(n));
+          return n;
+        } catch (_e) { return 999; }
+      }
+
+      function voiceLimitReached() { return getVoiceAnswers() >= VOICE_LIMIT; }
+
+      function updateVoiceCounter() {
+        if (!voiceCounterEl) return;
+        const left = Math.max(0, VOICE_LIMIT - getVoiceAnswers());
+        if (left <= 0) {
+          voiceCounterEl.innerHTML = 'Voice limit reached for today';
+          micBtn.disabled = true;
+        } else if (left < VOICE_LIMIT) {
+          voiceCounterEl.innerHTML = `<strong>${left}</strong> voice answer${left === 1 ? '' : 's'} left today`;
+          micBtn.disabled = false;
+        } else {
+          voiceCounterEl.innerHTML = '';
+          micBtn.disabled = false;
+        }
+      }
+
+      // --- SpeechRecognition (input) ---
+      function startListening() {
+        if (!SpeechRecognitionAPI || busy || voiceLimitReached()) return;
+        if (isListening) { recognition.stop(); return; }
+        if (!recognition) {
+          recognition = new SpeechRecognitionAPI();
+          recognition.lang = 'fr-FR';
+          recognition.interimResults = false;
+          recognition.maxAlternatives = 1;
+          recognition.continuous = false;
+
+          recognition.addEventListener('result', (e) => {
+            const text = e.results[0][0].transcript;
+            input.value = '';
+            autoresize();
+            lastInputWasVoice = true;
+            send(text, { display: true, voice: true });
+          });
+
+          recognition.addEventListener('end', () => {
+            isListening = false;
+            micBtn.classList.remove('listening');
+          });
+
+          recognition.addEventListener('error', (e) => {
+            isListening = false;
+            micBtn.classList.remove('listening');
+            if (e.error !== 'no-speech' && e.error !== 'aborted') {
+              showError('Voice error: ' + e.error);
+            }
+          });
+        }
+        isListening = true;
+        micBtn.classList.add('listening');
+        recognition.start();
+      }
+
+      micBtn.addEventListener('click', startListening);
+
+      // --- SpeechSynthesis (output) ---
+      function speakFrench(text) {
+        if (!text || !window.speechSynthesis) return;
+        window.speechSynthesis.cancel();
+        const utt = new SpeechSynthesisUtterance(text);
+        utt.lang = 'fr-FR';
+        utt.rate = 0.85;
+        const voices = window.speechSynthesis.getVoices();
+        const fr = voices.find((v) => v.lang === 'fr-FR') ||
+                   voices.find((v) => v.lang.startsWith('fr'));
+        if (fr) utt.voice = fr;
+        window.speechSynthesis.speak(utt);
+      }
+
+      // Preload voices (Chrome loads them async).
+      if (window.speechSynthesis) {
+        window.speechSynthesis.getVoices();
+        window.speechSynthesis.addEventListener('voiceschanged', () => {});
+      }
+
+      // Extract the French parts of a teacher reply for TTS — the corrected
+      // sentence and the follow-up question. Skips English feedback.
+      function extractFrenchForTTS(text) {
+        const parsed = parseTeacherReply(text);
+        if (!parsed.hasMarkers) return text;
+        const parts = [];
+        const corrected = parsed.corrections.find((c) => c.type === 'corrected');
+        if (corrected) parts.push(corrected.text);
+        if (parsed.question) parts.push(parsed.question);
+        return parts.join('. ') || text;
+      }
+
       function configureGateForRequirement(required) {
         passwordRequired = required;
         gatePasswordField.style.display = required ? '' : 'none';
@@ -879,6 +1069,7 @@
 
         configureGateForRequirement(required);
         updateSessionCounter();
+        updateVoiceCounter();
 
         // If we're mid-pause, just show the timer and stop — no auth flow,
         // no new conversation started until the pause ends.
@@ -961,7 +1152,8 @@
         const markers = [
           { key: 'good', regex: /^✅\s*GOOD:\s*/i },
           { key: 'fix', regex: /^🔧\s*FIX:\s*/i },
-          { key: 'corrected', regex: /^💬\s*CORRECTED:\s*/i }
+          { key: 'corrected', regex: /^💬\s*CORRECTED:\s*/i },
+          { key: 'sayit', regex: /^🗣️\s*SAY IT:\s*/i }
         ];
 
         const lines = text.split(/\r?\n/);
@@ -986,7 +1178,7 @@
             const content = line.replace(matched.regex, '').trim();
             correctionLines.push({ type: matched.key, text: content });
             stage = 'correction';
-            if (matched.key === 'corrected') sawCorrected = true;
+            if (matched.key === 'corrected' || matched.key === 'sayit') sawCorrected = true;
             continue;
           }
 
@@ -1042,7 +1234,8 @@
           const labelMap = {
             good: { cls: 'good', icon: '✅', label: 'Good' },
             fix: { cls: 'fix', icon: '🔧', label: 'Fix' },
-            corrected: { cls: 'corrected', icon: '💬', label: 'Corrected' }
+            corrected: { cls: 'corrected', icon: '💬', label: 'Corrected' },
+            sayit: { cls: 'sayit', icon: '🗣️', label: 'Say it' }
           };
           for (const c of parsed.corrections) {
             const meta = labelMap[c.type];
@@ -1076,12 +1269,18 @@
         scrollToBottom();
       }
 
-      async function send(userText, { display = true } = {}) {
+      async function send(userText, { display = true, voice = false } = {}) {
         if (busy) return;
         // Don't allow anything through while a pause is active.
         if (enforcePauseIfActive()) return;
+        // Voice-specific daily limit.
+        if (voice && voiceLimitReached()) {
+          showError('Voice limit reached for today (5/day). Switch to text to keep practicing!');
+          return;
+        }
         busy = true;
         sendBtn.disabled = true;
+        micBtn.disabled = true;
 
         if (display) addStudentMessage(userText);
 
@@ -1102,7 +1301,8 @@
               messages: history,
               name: getStoredName(),
               profile: getProfile(),
-              skipQuestion: willTriggerPause
+              skipQuestion: willTriggerPause,
+              voiceMode: voice
             })
           });
           const data = await res.json();
@@ -1118,22 +1318,25 @@
           if (!res.ok) {
             const msg = (data && (data.error?.message || data.error)) || 'Request failed';
             showError(typeof msg === 'string' ? msg : JSON.stringify(msg));
-            // roll back the user turn since there's no assistant reply
             history.pop();
             return;
           }
 
           const rawText = (data && data.text) || '';
-          // Extract hidden profile notes BEFORE rendering so the student
-          // never sees them. Store the visible text in history too so the
-          // model doesn't think it already knows what was in the <note>.
           const { visible, facts } = extractNote(rawText);
           if (facts.length) addProfileFacts(facts);
           history.push({ role: 'assistant', content: visible });
           renderTeacherReply(visible);
 
-          // Count this turn only if it was a real student answer (i.e. the
-          // user typed it — not the invisible "Start!" kickoff).
+          // If the student spoke, read the French parts aloud and track
+          // voice usage separately from the text session limit.
+          if (voice) {
+            const frenchText = extractFrenchForTTS(visible);
+            speakFrench(frenchText);
+            recordVoiceAnswer();
+            updateVoiceCounter();
+          }
+
           if (display) {
             recordAnswerAndMaybePause();
           }
@@ -1143,9 +1346,10 @@
           history.pop();
         } finally {
           busy = false;
-          // Keep send disabled if we just entered a pause.
+          lastInputWasVoice = false;
           if (!enforcePauseIfActive()) {
             sendBtn.disabled = false;
+            micBtn.disabled = voiceLimitReached();
             input.focus();
           }
         }
