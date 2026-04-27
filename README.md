@@ -71,6 +71,85 @@ Then open <http://localhost:3000>.
 
 ---
 
+## Curriculum
+
+Each session randomly picks one module and anchors the teacher's questions around it. There are currently **38 modules** spanning A1 grammar, vocabulary, and everyday situations.
+
+### Core A1
+
+| Module | Focus |
+|---|---|
+| Les Salutations | Formal vs informal greetings, "comment ça va" |
+| Les Nombres | Numbers 0–100 (age, phone, quantities) |
+| Les Jours et Les Mois | Days of the week (lowercase!) and months |
+| Les Fruits | Fruits with correct gender (le/la/un/une) |
+| La Famille | Family vocabulary + possessives (mon/ma/mes) |
+| Le Verbe ÊTRE | être in present, c'est / c'était |
+| Les Verbes Réfléchis | SE verbs: se lever, s'appeler, se promener |
+| Les Verbes Communs | Irregular verbs: aller, avoir, faire, prendre, vouloir |
+| Les Pays | Countries with en / au / aux |
+| Les Articles | Partitive du / de la / de l'; "de" after negation |
+| Les Possessifs | mon/ma/mes, ton/ta/tes, son/sa/ses |
+| Poser une Question | qui / quoi / quand / où / comment / pourquoi / combien |
+
+### Places & Directions
+
+| Module | Focus |
+|---|---|
+| La Position | Prepositions: dans, sur, sous, devant, derrière, à côté de, chez |
+| La Direction | à / au / aux / de / vers; contractions à+le=au, de+le=du |
+| Les Lieux | Places in the city: boulangerie, poste, supermarché |
+| Les Voies | Streets & waterways: rue, avenue, boulevard, pont, quai |
+| Les Parties de la Ville | centre-ville, banlieue, quartier, zone piétonne |
+| Les Lieux et les Monuments | Public buildings: mairie, gare, commissariat, banque |
+
+### Daily Life
+
+| Module | Focus |
+|---|---|
+| La Vie Quotidienne | Café / restaurant vocabulary and drinks |
+| Les Métiers | Jobs — no article after être; chez + person |
+| Les Loisirs | Hobbies with jouer à (sports) vs jouer de (instruments) |
+| Les Adjectifs | Agreement (m/f) and BAGS rule |
+| IL Y A | il y a / il n'y a pas de / il y a + time (ago) |
+| La Fréquence | toujours, souvent, parfois, rarement, ne…jamais; aussi after verb |
+| La Météo | il fait, il pleut, il neige, il y a du vent |
+| Le Temps | Time expressions: depuis, il y a, avant, après, pendant |
+| Les Nombres Ordinaux | Ordinals and floors (premier, deuxième, rez-de-chaussée) |
+
+### Grammar
+
+| Module | Focus |
+|---|---|
+| Le Passé Composé | avoir for most, être for DR MRS VANDERTRAMP + SE verbs; feminine -e |
+| Le Fonctionnement | Intensity adverbs: très, trop, assez, vraiment, beaucoup, un peu |
+| L'Impératif | TU/VOUS/NOUS (no pronoun, -ER drops -s); sois/aie/va; pour, parce que, mais, sans, ne…que, pendant |
+
+### Transport & Getting Around (Apr 2026)
+
+| Module | Focus |
+|---|---|
+| Le Transport | Vehicles (scooter, vélo, bus, métro, voiture, avion), se déplacer, monter, tourner à droite/gauche, tout droit |
+| Les Distances et le Covoiturage | Which transport for which distance; trajet, itinéraire, arrêt, quai; économiser, covoiturage |
+
+### Food & Descriptions (Apr 2026)
+
+| Module | Focus |
+|---|---|
+| La Nourriture | petit-déjeuner, poireau, poire, citrouille, haricots, maïs, ail, piment, pastèque, pamplemousse |
+| Les Pas et Les Étapes | Distinctions: les pas (walking), une étape (process), une marche (stairs) |
+| La Routine et les Descriptions | se lever, se dépêcher, se marier; retraité(e), bruyant, droitier/gaucher/ambidextre |
+
+### Advanced (Apr 2026)
+
+| Module | Focus |
+|---|---|
+| La Météo Avancée | orage, tonnerre, para- words (parapente, parasol, paratonnerre) |
+| Les Verbes Clés | prendre (full conjugation), devoir, apporter, économiser, voyager |
+| Les Expressions Idiomatiques | peu m'importe, au bord du gouffre, c'est la fin des haricots, tu sens bon |
+
+---
+
 ## Customization
 
 ### Add or edit curriculum modules

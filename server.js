@@ -183,6 +183,51 @@ const CURRICULUM_MODULES = [
     module: 'Les Lieux et les Monuments',
     focus: 'public buildings (mairie, gare, commissariat, banque) and monuments',
     hint: 'Il y a une mairie dans ton quartier ? Tu as visité un monument récemment ?'
+  },
+  {
+    module: 'Le Transport',
+    focus: 'vehicles (scooter, vélo, trottinette, bus, tram, métro, voiture, avion, bateau) + movement verbs (se déplacer, monter, marcher) + navigation (tourner à droite/gauche, aller tout droit, au bout de la rue)',
+    hint: 'Comment tu te déplaces pour aller au travail ? Tu prends le bus ou le métro ?'
+  },
+  {
+    module: 'Les Distances et le Covoiturage',
+    focus: 'which transport for which distance (1 km → marche, 2 km → vélo, 30+ km → voiture/bus); un trajet, un itinéraire, un arrêt, un quai; économiser, le covoiturage, une appli',
+    hint: 'C\'est loin, ton travail ? Tu fais du covoiturage ?'
+  },
+  {
+    module: 'L\'Impératif',
+    focus: 'imperative for TU/VOUS/NOUS (no subject pronoun, TU form drops -s for -ER verbs); irregulars: sois/soyez, aie/ayez, va/allez; connectors: pour, parce que, mais, avec, sans, ne…que, pendant',
+    hint: 'Va tout droit ! Soyez patients ! Allons au café !'
+  },
+  {
+    module: 'Les Pas et Les Étapes',
+    focus: 'step distinctions: les pas (walking steps), une étape (process step), une marche (stair step)',
+    hint: 'Combien de pas tu fais par jour ? Quelles sont les étapes pour faire un gâteau ?'
+  },
+  {
+    module: 'La Nourriture',
+    focus: 'meals (le petit-déjeuner, un petit repas) + vegetables/fruits with gender: le poireau, la poire, la citrouille, le haricot (rouge/vert/blanc/noir), le maïs, l\'ail, le piment, la pastèque, le pamplemousse',
+    hint: 'Qu\'est-ce que tu manges au petit-déjeuner ? Tu aimes la pastèque ?'
+  },
+  {
+    module: 'La Routine et les Descriptions',
+    focus: 'reflexive verbs for daily routine (se lever, se dépêcher, se marier); descriptors: retraité(e), bruyant, court/long, droitier/gaucher/ambidextre',
+    hint: 'À quelle heure tu te lèves le matin ? Tu es droitier ou gaucher ?'
+  },
+  {
+    module: 'La Météo Avancée',
+    focus: 'weather + nature: la pluie / il pleut, le tonnerre / il y a de l\'orage, le soleil; para- words: parachute, parapente, parasol, paratonnerre; un cerveau',
+    hint: 'Il y a de l\'orage aujourd\'hui ? Tu as déjà fait du parapente ?'
+  },
+  {
+    module: 'Les Verbes Clés',
+    focus: 'prendre (full conjugation: je prends, tu prends, il prend, nous prenons, vous prenez, ils prennent), devoir, apporter, économiser, voyager',
+    hint: 'Qu\'est-ce que tu prends le matin ? Tu dois travailler demain ?'
+  },
+  {
+    module: 'Les Expressions Idiomatiques',
+    focus: 'idioms: peu m\'importe, je suis au bord du gouffre, c\'est la fin des haricots, tu as besoin d\'un verre, tu sens bon; use in context',
+    hint: 'Peu m\'importe ! C\'est la fin des haricots !'
   }
 ];
 
@@ -190,7 +235,7 @@ const CURRICULUM_MODULES = [
 // has awareness of what the student is learning and can pull follow-ups
 // from neighboring modules when natural. Kept short to control tokens.
 const CURRICULUM_SUMMARY =
-  'A1 curriculum covers: salutations, alphabet/accents, subject+reflexive pronouns, nombres 0–100, jours (lowercase)/mois, fruits w/ gender, être (present/PC/imparfait), famille+possessifs, verbes réfléchis (SE), verbes communs (aller, avoir, faire, prendre…), pays+en/au/aux, articles (le/un/du), prépositions de position (dans, sur, chez…), expressions de temps (depuis, il y a, avant, après), direction (à/au/aux, de/du), poser une question, loisirs (jouer à/de), possessifs (mon/ma/mes), lieux en ville, adjectifs+BAGS, il y a, café/restaurant, métiers (être + profession sans article; chez + personne), météo (il fait…), fréquence (toujours, souvent, jamais; aussi après le verbe), nombres ordinaux, passé composé (avoir/être, DR MRS VANDERTRAMP, accord féminin), adverbes d\'intensité (très, trop, assez), voies (rue/avenue/boulevard/pont/quai), parties de la ville, monuments et bâtiments publics.';
+  'A1 curriculum covers: salutations, alphabet/accents, subject+reflexive pronouns, nombres 0–100, jours (lowercase)/mois, fruits w/ gender, être (present/PC/imparfait), famille+possessifs, verbes réfléchis (SE), verbes communs (aller, avoir, faire, prendre…), pays+en/au/aux, articles (le/un/du), prépositions de position (dans, sur, chez…), expressions de temps (depuis, il y a, avant, après), direction (à/au/aux, de/du), poser une question, loisirs (jouer à/de), possessifs (mon/ma/mes), lieux en ville, adjectifs+BAGS, il y a, café/restaurant, métiers (être + profession sans article; chez + personne), météo (il fait…, il pleut, orage, tonnerre, para- words), fréquence (toujours, souvent, jamais; aussi après le verbe), nombres ordinaux, passé composé (avoir/être, DR MRS VANDERTRAMP, accord féminin), adverbes d\'intensité (très, trop, assez), voies (rue/avenue/boulevard/pont/quai), parties de la ville, monuments et bâtiments publics, transport (vélo/bus/métro/voiture/avion, se déplacer, trajet, itinéraire, arrêt, quai, monter, marcher, tourner, tout droit), distances+covoiturage+économiser, l\'impératif (TU/VOUS/NOUS sans pronom, -ER perd le -s; sois/aie/va; pour/parce que/mais/avec/sans/ne…que/pendant), pas/étape/marche, nourriture (petit-déjeuner, poireau, poire, citrouille, haricots, maïs, ail, piment, pastèque, pamplemousse), routine+descriptions (se lever/se dépêcher/se marier, retraité, bruyant, court/long, droitier/gaucher/ambidextre), verbes clés (prendre conjugué, devoir, apporter, économiser, voyager), expressions idiomatiques (peu m\'importe, au bord du gouffre, la fin des haricots, tu sens bon).';
 
 const GREETINGS = ['Bonjour', 'Salut', 'Coucou', 'Hé'];
 
