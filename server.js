@@ -273,7 +273,7 @@ function sanitizeProfile(raw) {
 // `skipQuestion` is true on the final answer before a scheduled pause — the
 // teacher corrects the answer but does NOT ask a new question that the
 // student would be locked out of for 3 hours.
-function buildSystemPrompt(rawName, isOpening, profile, skipQuestion) {
+function buildSystemPrompt(rawName, isOpening, profile, skipQuestion, voiceMode) {
   const name = sanitizeName(rawName) || 'the student';
   const mod = pickRandom(CURRICULUM_MODULES);
   const greeting = pickRandom(GREETINGS);
@@ -298,6 +298,12 @@ For step 3, instead of asking a new question, add ONE short warm English line te
     ? `3. Do NOT ask a new question this turn.`
     : `3. Ask ONE new simple A1 question — personalize it with what you know about ${name} when relevant.`;
 
+  const pronunciationStep = voiceMode
+    ? `4. After the 💬 CORRECTED line (or after the question), add:
+🗣️ SAY IT: [phonetic pronunciation hints for the 1–3 trickiest words in the corrected sentence — e.g. "je PRENDS (prahn) le bus au TRAVAIL (trah-vahy)"]
+Focus on: nasal sounds (an/en → ahn, on → ohn, in → ehn), silent letters, liaisons, and elision. Keep it short — only the hardest words, not every word. If everything is simple to pronounce, skip this line.`
+    : '';
+
   return `You are a warm, playful French teacher helping ${name}, an A1 beginner, practice French. Address ${name} by name naturally.
 
 EACH TURN (after the first):
@@ -307,6 +313,7 @@ EACH TURN (after the first):
 🔧 FIX: [mistake] → [correct form] — [simple English explanation]
 💬 CORRECTED: [full corrected sentence]
 ${questionStep}
+${pronunciationStep}
 
 RULES:
 - A1 vocabulary only.
@@ -418,7 +425,7 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  const { messages, name, profile, skipQuestion } = req.body || {};
+  const { messages, name, profile, skipQuestion, voiceMode } = req.body || {};
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: { message: 'messages must be a non-empty array' } });
   }
@@ -430,7 +437,7 @@ app.post('/api/chat', async (req, res) => {
     const { status, data } = await callAnthropic(apiKey, {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      system: buildSystemPrompt(name, isOpening, profile, Boolean(skipQuestion)),
+      system: buildSystemPrompt(name, isOpening, profile, Boolean(skipQuestion), Boolean(voiceMode)),
       messages: trimmedMessages
     });
 

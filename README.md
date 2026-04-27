@@ -10,8 +10,12 @@ Built around the [Anthropic Messages API](https://docs.claude.com/en/api/message
 
 - **A1 curriculum-driven prompts.** Each session picks one module (salutations, passé composé, prépositions, métiers, …) and anchors the teacher's questions around it, so you practice concrete grammar instead of generic "how was your day" chatter.
 - **Structured corrections.** The teacher response is parsed on the client into three sections: what you got right, what to fix, and the fully corrected sentence — rendered as clean cards, not a wall of text.
+- **Voice conversation.** Tap the 🎤 mic button to speak your answer in French. The app transcribes it via the browser's `SpeechRecognition` API (`fr-FR`), sends it to the tutor, and reads the corrected sentence and follow-up question aloud via `SpeechSynthesis` at 0.85x speed. Type a message instead and the response stays text-only — mode is detected per message, no toggle needed. Voice uses free browser-native APIs (zero additional cost). Mic button is hidden on unsupported browsers (graceful fallback to text-only).
+- **Pronunciation tips.** When you speak your answer, the tutor adds a `🗣️ SAY IT:` line with phonetic hints for the trickiest words — nasal sounds, silent letters, liaisons (e.g. "je PRENDS (prahn) le bus").
 - **Teach-on-English.** Drop an English word into your French ("je want du café") and the tutor translates it into the corrected sentence and explains how to use it, instead of rejecting the turn.
-- **Session limit with timer.** Every 5 answers the composer is replaced with a live 3-hour countdown. State is persisted in `localStorage`, so refreshing or closing the tab doesn't reset it. The 5th answer never spawns a wasted question the student would be locked out of.
+- **Session limits.**
+  - *Text:* every 5 answers the composer is replaced with a live 3-hour countdown. State is persisted in `localStorage`, so refreshing or closing the tab doesn't reset it. The 5th answer corrects without asking a new question.
+  - *Voice:* 5 voice answers per calendar day. Counter shown in the header; mic disables when the cap is hit. Resets at midnight.
 - **Personalization that persists.** The tutor quietly extracts short facts it learns (hobbies, family, job, city, …) via a hidden `<note>…</note>` trailer, the client strips the tag and stores the facts in `localStorage`, and future prompts include them under `KNOWN ABOUT <NAME>` so questions feel personal across sessions.
 - **Optional password gate** for shared deployments.
 - **Mobile-friendly.** The chat handles iOS/Android virtual-keyboard quirks with `visualViewport` tracking and scroll-pinning.
@@ -50,24 +54,30 @@ Then open <http://localhost:3000>.
 ```
 ┌──────────────┐        POST /api/chat          ┌──────────────┐        ┌────────────────┐
 │  index.html  │ ──────────────────────────────▶│  server.js   │ ─────▶ │ Anthropic API  │
-│  (vanilla JS)│    { messages, name,           │   (Express)  │        │  claude-haiku  │
-│              │◀──   profile, skipQuestion }   │              │◀─────  │  4.5           │
+│  (vanilla JS)│    { messages, name, profile,  │   (Express)  │        │  claude-haiku  │
+│              │◀──   skipQuestion, voiceMode }  │              │◀─────  │  4.5           │
 └──────────────┘        { text, raw }           └──────────────┘        └────────────────┘
+       │
+       ├── Browser APIs
+       │     SpeechRecognition (fr-FR)  → voice input
+       │     SpeechSynthesis   (fr-FR)  → voice output
        │
        ├── localStorage
        │     oohlalangue_name
        │     oohlalangue_password
-       │     oohlalangue_profile       (array of learned facts)
-       │     oohlalangue_answers       (0–5 counter)
-       │     oohlalangue_pause_until   (epoch ms)
+       │     oohlalangue_profile         (array of learned facts)
+       │     oohlalangue_answers         (0–5 text counter)
+       │     oohlalangue_pause_until     (epoch ms)
+       │     oohlalangue_voice_answers   (0–5 daily voice counter)
+       │     oohlalangue_voice_date      (YYYY-MM-DD, resets counter)
        └── in-memory history (the Messages-API transcript)
 ```
 
 - **`server.js`** is a thin Express server that:
   - Serves the static `index.html`.
   - Gates `/api/chat` behind the optional password.
-  - Builds the per-request system prompt (curriculum module, known facts, session-end instructions) and forwards the trimmed conversation to Anthropic's Messages API.
-- **`index.html`** holds everything else: chat UI, correction parser, localStorage profile, session-limit timer, mobile keyboard handling. No build step; edit and reload.
+  - Builds the per-request system prompt (curriculum module, known facts, session-end instructions, pronunciation tips when `voiceMode` is true) and forwards the trimmed conversation to Anthropic's Messages API.
+- **`index.html`** holds everything else: chat UI, correction parser, localStorage profile, session-limit timer, voice I/O, mobile keyboard handling. No build step; edit and reload.
 
 ---
 
@@ -165,8 +175,9 @@ The system prompt is built in `buildSystemPrompt()` (`server.js`). The `EACH TUR
 In `index.html`:
 
 ```js
-const ANSWERS_PER_WINDOW = 5;
-const PAUSE_MS = 3 * 60 * 60 * 1000; // 3 hours
+const ANSWERS_PER_WINDOW = 5;          // text answers before 3h pause
+const PAUSE_MS = 3 * 60 * 60 * 1000;  // pause duration
+const VOICE_LIMIT = 5;                 // voice answers per calendar day
 ```
 
 ### Reset a student's profile or session state
