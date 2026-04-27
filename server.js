@@ -280,7 +280,9 @@ function buildSystemPrompt(rawName, isOpening, profile, skipQuestion) {
 
   let openingBlock;
   if (skipQuestion) {
-    openingBlock = `THIS IS THE FINAL ANSWER OF THE CURRENT SESSION. After your correction block, do NOT ask a new question. Instead add ONE short warm English line telling ${name} they've reached the 5-answer session limit and can come back in a bit — invite them to review the corrections above while they wait.`;
+    openingBlock = `THIS IS THE LAST ANSWER OF THE SESSION.
+You MUST still follow steps 1–2 above exactly (react in English, then ✅ GOOD / 🔧 FIX / 💬 CORRECTED). The correction is the most important part — do NOT skip it.
+For step 3, instead of asking a new question, add ONE short warm English line telling ${name} they've reached the 5-answer session limit and can come back soon. Keep it encouraging.`;
   } else if (isOpening) {
     openingBlock = `FIRST TURN: Greet ${name} in French with "${greeting} ${name} !" (or a similar warm variation) and ask ONE short A1 question that exercises "${mod.module}" — ${mod.focus}. Inspiration (do NOT copy verbatim): "${mod.hint}". 1–2 sentences total.`;
   } else {
