@@ -435,16 +435,6 @@
         opacity: 0.7;
       }
 
-      .voice-counter {
-        font-size: 11px;
-        letter-spacing: 0.4px;
-        color: var(--muted);
-      }
-      .voice-counter strong {
-        color: var(--coral);
-        font-weight: 600;
-      }
-
       .correction .sayit {
         background: rgba(160, 160, 184, 0.08);
         color: var(--muted);
@@ -693,7 +683,6 @@
           <span class="badge">A1 · Débutant</span>
         </div>
         <div class="session-counter" id="sessionCounter" aria-live="polite"></div>
-        <div class="voice-counter" id="voiceCounter" aria-live="polite"></div>
       </header>
 
       <div id="chat" aria-live="polite"></div>
@@ -730,7 +719,6 @@
       const input = document.getElementById('input');
       const sendBtn = document.getElementById('sendBtn');
       const micBtn = document.getElementById('micBtn');
-      const voiceCounterEl = document.getElementById('voiceCounter');
 
       const history = [];
       let busy = false;
@@ -750,7 +738,7 @@
       const PROFILE_KEY = 'oohlalangue_profile';
       const ANSWERS_KEY = 'oohlalangue_answers';
       const PAUSE_UNTIL_KEY = 'oohlalangue_pause_until';
-      const ANSWERS_PER_WINDOW = 5;
+      const ANSWERS_PER_WINDOW = 10;
       const PAUSE_MS = 3 * 60 * 60 * 1000; // 3 hours
       let passwordRequired = false;
 
@@ -813,7 +801,7 @@
         pauseEl.classList.add('hidden');
         form.classList.remove('hidden');
         sendBtn.disabled = false;
-        micBtn.disabled = voiceLimitReached();
+        micBtn.disabled = false;
         input.disabled = false;
       }
 
@@ -915,54 +903,11 @@
       }
 
       // ---- Voice / Speech (browser-native APIs, zero cost) ----
-      const VOICE_ANSWERS_KEY = 'oohlalangue_voice_answers';
-      const VOICE_DATE_KEY = 'oohlalangue_voice_date';
-      const VOICE_LIMIT = 5;
       const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
       let recognition = null;
       let isListening = false;
 
       if (!SpeechRecognitionAPI) micBtn.classList.add('no-support');
-
-      function todayStr() { return new Date().toISOString().slice(0, 10); }
-
-      function getVoiceAnswers() {
-        try {
-          const d = localStorage.getItem(VOICE_DATE_KEY) || '';
-          if (d !== todayStr()) {
-            localStorage.setItem(VOICE_DATE_KEY, todayStr());
-            localStorage.setItem(VOICE_ANSWERS_KEY, '0');
-            return 0;
-          }
-          return parseInt(localStorage.getItem(VOICE_ANSWERS_KEY) || '0', 10) || 0;
-        } catch (_e) { return 0; }
-      }
-
-      function recordVoiceAnswer() {
-        try {
-          localStorage.setItem(VOICE_DATE_KEY, todayStr());
-          const n = getVoiceAnswers() + 1;
-          localStorage.setItem(VOICE_ANSWERS_KEY, String(n));
-          return n;
-        } catch (_e) { return 999; }
-      }
-
-      function voiceLimitReached() { return getVoiceAnswers() >= VOICE_LIMIT; }
-
-      function updateVoiceCounter() {
-        if (!voiceCounterEl) return;
-        const left = Math.max(0, VOICE_LIMIT - getVoiceAnswers());
-        if (left <= 0) {
-          voiceCounterEl.innerHTML = 'Voice limit reached for today';
-          micBtn.disabled = true;
-        } else if (left < VOICE_LIMIT) {
-          voiceCounterEl.innerHTML = `<strong>${left}</strong> voice answer${left === 1 ? '' : 's'} left today`;
-          micBtn.disabled = false;
-        } else {
-          voiceCounterEl.innerHTML = '';
-          micBtn.disabled = false;
-        }
-      }
 
       // --- SpeechRecognition (input) ---
       const voiceStatus = document.getElementById('voiceStatus');
@@ -1002,7 +947,7 @@
       }
 
       function startListening() {
-        if (!SpeechRecognitionAPI || busy || voiceLimitReached()) return;
+        if (!SpeechRecognitionAPI || busy) return;
         if (isListening) { stopAndSend(); return; }
         if (!recognition) {
           recognition = new SpeechRecognitionAPI();
@@ -1205,7 +1150,6 @@
 
         configureGateForRequirement(required);
         updateSessionCounter();
-        updateVoiceCounter();
 
         // If we're mid-pause, just show the timer and stop — no auth flow,
         // no new conversation started until the pause ends.
@@ -1409,11 +1353,6 @@
         if (busy) return;
         // Don't allow anything through while a pause is active.
         if (enforcePauseIfActive()) return;
-        // Voice-specific daily limit.
-        if (voice && voiceLimitReached()) {
-          showError('Voice limit reached for today (5/day). Switch to text to keep practicing!');
-          return;
-        }
         busy = true;
         sendBtn.disabled = true;
         micBtn.disabled = true;
@@ -1464,13 +1403,9 @@
           history.push({ role: 'assistant', content: visible });
           renderTeacherReply(visible);
 
-          // If the student spoke, read the French parts aloud and track
-          // voice usage separately from the text session limit.
           if (voice) {
             const frenchText = extractFrenchForTTS(visible);
             speakFrench(frenchText);
-            recordVoiceAnswer();
-            updateVoiceCounter();
           }
 
           if (display) {
@@ -1485,7 +1420,7 @@
           lastInputWasVoice = false;
           if (!enforcePauseIfActive()) {
             sendBtn.disabled = false;
-            micBtn.disabled = voiceLimitReached();
+            micBtn.disabled = false;
             input.focus();
           }
         }
