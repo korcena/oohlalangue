@@ -387,6 +387,54 @@
         display: none;
       }
 
+      .voice-status {
+        display: none;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        background: rgba(255, 140, 105, 0.1);
+        border: 1px solid rgba(255, 140, 105, 0.25);
+        border-radius: 12px;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: var(--coral);
+        line-height: 1.4;
+      }
+
+      .voice-status.active {
+        display: flex;
+      }
+
+      .voice-status .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--coral);
+        flex-shrink: 0;
+        animation: blink-dot 1s ease-in-out infinite;
+      }
+
+      @keyframes blink-dot {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+
+      .voice-status .transcript-preview {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text);
+        font-style: italic;
+      }
+
+      .voice-status .voice-hint {
+        flex-shrink: 0;
+        font-size: 11px;
+        opacity: 0.7;
+      }
+
       .voice-counter {
         font-size: 11px;
         letter-spacing: 0.4px;
@@ -650,6 +698,11 @@
 
       <div id="chat" aria-live="polite"></div>
 
+      <div class="voice-status" id="voiceStatus">
+        <span class="dot"></span>
+        <span class="transcript-preview" id="voicePreview">Listening…</span>
+        <span class="voice-hint">tap 🎤 to send</span>
+      </div>
       <form id="form">
         <textarea
           id="input"
@@ -750,6 +803,7 @@
       function showPause() {
         pauseEl.classList.remove('hidden');
         form.classList.add('hidden');
+        voiceStatus.classList.remove('active');
         sendBtn.disabled = true;
         micBtn.disabled = true;
         input.disabled = true;
@@ -911,40 +965,102 @@
       }
 
       // --- SpeechRecognition (input) ---
+      const voiceStatus = document.getElementById('voiceStatus');
+      const voicePreview = document.getElementById('voicePreview');
+      let finalTranscript = '';
+      let silenceTimer = null;
+      const SILENCE_TIMEOUT = 2000;
+
+      function showVoiceStatus(show) {
+        voiceStatus.classList.toggle('active', show);
+      }
+
+      function updatePreview(text) {
+        voicePreview.textContent = text || 'Listening…';
+      }
+
+      function stopAndSend() {
+        if (!isListening) return;
+        clearTimeout(silenceTimer);
+        isListening = false;
+        try { recognition.stop(); } catch (_) {}
+        micBtn.classList.remove('listening');
+        showVoiceStatus(false);
+        const text = finalTranscript.trim();
+        finalTranscript = '';
+        if (text) {
+          input.value = '';
+          autoresize();
+          lastInputWasVoice = true;
+          send(text, { display: true, voice: true });
+        }
+      }
+
+      function resetSilenceTimer() {
+        clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(stopAndSend, SILENCE_TIMEOUT);
+      }
+
       function startListening() {
         if (!SpeechRecognitionAPI || busy || voiceLimitReached()) return;
-        if (isListening) { recognition.stop(); return; }
+        if (isListening) { stopAndSend(); return; }
         if (!recognition) {
           recognition = new SpeechRecognitionAPI();
           recognition.lang = 'fr-FR';
-          recognition.interimResults = false;
+          recognition.interimResults = true;
           recognition.maxAlternatives = 1;
-          recognition.continuous = false;
+          recognition.continuous = true;
 
           recognition.addEventListener('result', (e) => {
-            const text = e.results[0][0].transcript;
-            input.value = '';
-            autoresize();
-            lastInputWasVoice = true;
-            send(text, { display: true, voice: true });
+            let interim = '';
+            finalTranscript = '';
+            for (let i = 0; i < e.results.length; i++) {
+              if (e.results[i].isFinal) {
+                finalTranscript += e.results[i][0].transcript;
+              } else {
+                interim += e.results[i][0].transcript;
+              }
+            }
+            updatePreview(finalTranscript + interim || 'Listening…');
+            resetSilenceTimer();
           });
 
           recognition.addEventListener('end', () => {
-            isListening = false;
-            micBtn.classList.remove('listening');
+            if (isListening) {
+              // Browser stopped unexpectedly (e.g. silence) — send what we have
+              isListening = false;
+              clearTimeout(silenceTimer);
+              micBtn.classList.remove('listening');
+              showVoiceStatus(false);
+              const text = finalTranscript.trim();
+              finalTranscript = '';
+              if (text) {
+                input.value = '';
+                autoresize();
+                lastInputWasVoice = true;
+                send(text, { display: true, voice: true });
+              }
+            }
           });
 
           recognition.addEventListener('error', (e) => {
+            clearTimeout(silenceTimer);
             isListening = false;
             micBtn.classList.remove('listening');
+            showVoiceStatus(false);
+            finalTranscript = '';
             if (e.error !== 'no-speech' && e.error !== 'aborted') {
               showError('Voice error: ' + e.error);
             }
           });
         }
+        finalTranscript = '';
         isListening = true;
         micBtn.classList.add('listening');
+        updatePreview('Listening…');
+        showVoiceStatus(true);
         recognition.start();
+        resetSilenceTimer();
       }
 
       micBtn.addEventListener('click', startListening);
