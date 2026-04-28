@@ -13,9 +13,7 @@ Built around the [Anthropic Messages API](https://docs.claude.com/en/api/message
 - **Voice conversation.** Tap the 🎤 mic button to speak your answer in French. A live status bar shows a pulsing dot and a real-time transcript preview so you always know when the app is listening. Speak naturally — continuous recognition captures your full sentence without cutting off mid-speech. Tap the mic again to send, or wait 2 seconds after you stop talking and it sends automatically. The tutor reads the corrected sentence and follow-up question aloud via `SpeechSynthesis` at 0.85x speed. Type a message instead and the response stays text-only — mode is detected per message, no toggle needed. Voice uses free browser-native APIs (zero additional cost). Mic button is hidden on unsupported browsers (graceful fallback to text-only).
 - **Pronunciation tips.** When you speak your answer, the tutor adds a `🗣️ SAY IT:` line with phonetic hints for the trickiest words — nasal sounds, silent letters, liaisons (e.g. "je PRENDS (prahn) le bus").
 - **Teach-on-English.** Drop an English word into your French ("je want du café") and the tutor translates it into the corrected sentence and explains how to use it, instead of rejecting the turn.
-- **Session limits.**
-  - *Text:* every 5 answers the composer is replaced with a live 3-hour countdown. State is persisted in `localStorage`, so refreshing or closing the tab doesn't reset it. The 5th answer corrects without asking a new question.
-  - *Voice:* 5 voice answers per calendar day. Counter shown in the header; mic disables when the cap is hit. Resets at midnight.
+- **Session limits.** Every 10 answers (voice and text combined) the composer is replaced with a live 3-hour countdown. State is persisted in `localStorage`, so refreshing or closing the tab doesn't reset it. The 10th answer corrects without asking a new question.
 - **Personalization that persists.** The tutor quietly extracts short facts it learns (hobbies, family, job, city, …) via a hidden `<note>…</note>` trailer, the client strips the tag and stores the facts in `localStorage`, and future prompts include them under `KNOWN ABOUT <NAME>` so questions feel personal across sessions.
 - **Optional password gate** for shared deployments.
 - **Mobile-friendly.** The chat handles iOS/Android virtual-keyboard quirks with `visualViewport` tracking and scroll-pinning.
@@ -66,10 +64,8 @@ Then open <http://localhost:3000>.
        │     oohlalangue_name
        │     oohlalangue_password
        │     oohlalangue_profile         (array of learned facts)
-       │     oohlalangue_answers         (0–5 text counter)
+       │     oohlalangue_answers         (0–10 shared counter)
        │     oohlalangue_pause_until     (epoch ms)
-       │     oohlalangue_voice_answers   (0–5 daily voice counter)
-       │     oohlalangue_voice_date      (YYYY-MM-DD, resets counter)
        └── in-memory history (the Messages-API transcript)
 ```
 
@@ -175,9 +171,8 @@ The system prompt is built in `buildSystemPrompt()` (`server.js`). The `EACH TUR
 In `index.html`:
 
 ```js
-const ANSWERS_PER_WINDOW = 5;          // text answers before 3h pause
+const ANSWERS_PER_WINDOW = 10;         // answers (voice + text) before 3h pause
 const PAUSE_MS = 3 * 60 * 60 * 1000;  // pause duration
-const VOICE_LIMIT = 5;                 // voice answers per calendar day
 ```
 
 ### Reset a student's profile or session state
