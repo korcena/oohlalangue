@@ -950,10 +950,30 @@
       micBtn.addEventListener('click', startListening);
 
       // --- SpeechSynthesis (output) ---
+      // Strip symbols, emoji, and markdown so the TTS engine reads only
+      // natural spoken text — no "asterisk", "exclamation mark at sign", etc.
+      function cleanForSpeech(raw) {
+        let s = raw;
+        s = s.replace(/\*+/g, '');
+        s = s.replace(/#+ */g, '');
+        s = s.replace(/[_~`>|]/g, '');
+        s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+        // Strip emoji (broad Unicode ranges: dingbats, emoticons, symbols,
+        // supplemental, flags, skin-tone modifiers, variation selectors).
+        s = s.replace(/[☀-➿︀-️\u{1F000}-\u{1FAFF}\u{E0020}-\u{E007F}‍]/gu, '');
+        s = s.replace(/→/g, ', ');
+        s = s.replace(/—/g, ', ');
+        s = s.replace(/[(){}\[\]<>]/g, '');
+        s = s.replace(/ {2,}/g, ' ');
+        return s.trim();
+      }
+
       function speakFrench(text) {
         if (!text || !window.speechSynthesis) return;
+        const clean = cleanForSpeech(text);
+        if (!clean) return;
         window.speechSynthesis.cancel();
-        const utt = new SpeechSynthesisUtterance(text);
+        const utt = new SpeechSynthesisUtterance(clean);
         utt.lang = 'fr-FR';
         utt.rate = 0.85;
         const voices = window.speechSynthesis.getVoices();
