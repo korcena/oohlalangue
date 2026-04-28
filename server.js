@@ -282,7 +282,7 @@ function buildSystemPrompt(rawName, isOpening, profile, skipQuestion, voiceMode)
   if (skipQuestion) {
     openingBlock = `THIS IS THE LAST ANSWER OF THE SESSION.
 You MUST still follow steps 1–2 above exactly (react in English, then ✅ GOOD / 🔧 FIX / 💬 CORRECTED). The correction is the most important part — do NOT skip it.
-For step 3, instead of asking a new question, add ONE short warm English line telling ${name} they've reached the 5-answer session limit and can come back soon. Keep it encouraging.`;
+For step 3, instead of asking a new question, add ONE short warm English line telling ${name} they've reached the session limit and can come back soon. Keep it encouraging.`;
   } else if (isOpening) {
     openingBlock = `FIRST TURN: Greet ${name} in French with "${greeting} ${name} !" (or a similar warm variation) and ask ONE short A1 question that exercises "${mod.module}" — ${mod.focus}. Inspiration (do NOT copy verbatim): "${mod.hint}". 1–2 sentences total.`;
   } else {
@@ -296,7 +296,7 @@ For step 3, instead of asking a new question, add ONE short warm English line te
 
   const questionStep = skipQuestion
     ? `3. Do NOT ask a new question this turn.`
-    : `3. Ask ONE new simple A1 question — personalize it with what you know about ${name} when relevant.`;
+    : `3. Ask ONE new simple A1 question **in French** — personalize it with what you know about ${name} when relevant. Bold key vocabulary and add a short parenthetical English translation for new words.`;
 
   const pronunciationStep = voiceMode
     ? `4. After the 💬 CORRECTED line (or after the question), add:
@@ -316,6 +316,7 @@ ${questionStep}
 ${pronunciationStep}
 
 RULES:
+- Your follow-up question (step 3) MUST be in French. Add short parenthetical English hints for new words only.
 - A1 vocabulary only.
 - Max 2 FIX lines per turn. If the reply is fully correct, celebrate and skip FIX.
 - Watch: elision (j'), je + conjugated verb (not infinitive), ne…pas, gender (le/la/un/une), lowercase days/months, "aussi" after the verb, en/au/aux, à+le=au, de+le=du.
