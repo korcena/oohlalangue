@@ -1173,6 +1173,17 @@
         showGate();
       }
 
+      function mdToHtml(text) {
+        let s = text
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        s = s.replace(/\n/g, '<br>');
+        return s;
+      }
+
       function scrollToBottom() {
         chatEl.scrollTop = chatEl.scrollHeight;
       }
@@ -1294,7 +1305,7 @@
         if (!parsed.hasMarkers) {
           const bubble = document.createElement('div');
           bubble.className = 'bubble';
-          bubble.textContent = text;
+          bubble.innerHTML = mdToHtml(text);
           content.appendChild(bubble);
           chatEl.appendChild(row);
           scrollToBottom();
@@ -1304,7 +1315,7 @@
         if (parsed.intro) {
           const bubble = document.createElement('div');
           bubble.className = 'bubble intro';
-          bubble.textContent = parsed.intro;
+          bubble.innerHTML = mdToHtml(parsed.intro);
           content.appendChild(bubble);
         }
 
@@ -1330,7 +1341,9 @@
             label.className = 'label';
             label.textContent = meta.label;
             body.appendChild(label);
-            body.appendChild(document.createTextNode(c.text));
+            const textSpan = document.createElement('span');
+            textSpan.innerHTML = mdToHtml(c.text);
+            body.appendChild(textSpan);
             section.appendChild(icon);
             section.appendChild(body);
             card.appendChild(section);
@@ -1341,7 +1354,7 @@
         if (parsed.question) {
           const bubble = document.createElement('div');
           bubble.className = 'bubble question';
-          bubble.textContent = parsed.question;
+          bubble.innerHTML = mdToHtml(parsed.question);
           content.appendChild(bubble);
         }
 
