@@ -913,8 +913,10 @@
       const voiceStatus = document.getElementById('voiceStatus');
       const voicePreview = document.getElementById('voicePreview');
       let finalTranscript = '';
+      let interimText = '';
       let silenceTimer = null;
-      const SILENCE_TIMEOUT = 2000;
+      let wantListening = false;
+      const SILENCE_TIMEOUT = 2500;
 
       function showVoiceStatus(show) {
         voiceStatus.classList.toggle('active', show);
@@ -925,7 +927,7 @@
       }
 
       function stopAndSend() {
-        if (!isListening) return;
+        wantListening = false;
         clearTimeout(silenceTimer);
         isListening = false;
         try { recognition.stop(); } catch (_) {}
@@ -933,6 +935,7 @@
         showVoiceStatus(false);
         const text = finalTranscript.trim();
         finalTranscript = '';
+        interimText = '';
         if (text) {
           input.value = '';
           autoresize();
@@ -948,42 +951,34 @@
 
       function startListening() {
         if (!SpeechRecognitionAPI || busy) return;
-        if (isListening) { stopAndSend(); return; }
+        if (isListening || wantListening) { stopAndSend(); return; }
         if (!recognition) {
           recognition = new SpeechRecognitionAPI();
           recognition.lang = 'fr-FR';
           recognition.interimResults = true;
           recognition.maxAlternatives = 1;
-          recognition.continuous = true;
+          recognition.continuous = false;
 
           recognition.addEventListener('result', (e) => {
-            let interim = '';
-            finalTranscript = '';
-            for (let i = 0; i < e.results.length; i++) {
-              if (e.results[i].isFinal) {
-                finalTranscript += e.results[i][0].transcript;
-              } else {
-                interim += e.results[i][0].transcript;
-              }
+            const result = e.results[0];
+            if (result.isFinal) {
+              finalTranscript += result[0].transcript;
+              interimText = '';
+            } else {
+              interimText = result[0].transcript;
             }
-            updatePreview(finalTranscript + interim || 'Listening…');
+            updatePreview(finalTranscript + interimText || 'Listening…');
             resetSilenceTimer();
           });
 
           recognition.addEventListener('end', () => {
-            if (isListening) {
-              // Browser stopped unexpectedly (e.g. silence) — send what we have
-              isListening = false;
-              clearTimeout(silenceTimer);
-              micBtn.classList.remove('listening');
-              showVoiceStatus(false);
-              const text = finalTranscript.trim();
-              finalTranscript = '';
-              if (text) {
-                input.value = '';
-                autoresize();
-                lastInputWasVoice = true;
-                send(text, { display: true, voice: true });
+            isListening = false;
+            if (wantListening) {
+              try {
+                recognition.start();
+                isListening = true;
+              } catch (_) {
+                stopAndSend();
               }
             }
           });
@@ -991,15 +986,28 @@
           recognition.addEventListener('error', (e) => {
             clearTimeout(silenceTimer);
             isListening = false;
+            if (e.error === 'no-speech' && wantListening) {
+              try {
+                recognition.start();
+                isListening = true;
+              } catch (_) {
+                stopAndSend();
+              }
+              return;
+            }
+            wantListening = false;
             micBtn.classList.remove('listening');
             showVoiceStatus(false);
             finalTranscript = '';
-            if (e.error !== 'no-speech' && e.error !== 'aborted') {
+            interimText = '';
+            if (e.error !== 'aborted') {
               showError('Voice error: ' + e.error);
             }
           });
         }
         finalTranscript = '';
+        interimText = '';
+        wantListening = true;
         isListening = true;
         micBtn.classList.add('listening');
         updatePreview('Listening…');
