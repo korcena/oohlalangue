@@ -49,7 +49,7 @@ async function verifyStoredPassword() {
  *
  * @returns {Promise<boolean>} true when the learner may proceed
  */
-export async function ensureAuthenticated() {
+export async function ensureAuthenticated(signal) {
   let required = false;
   try {
     const data = await api.authRequired();
@@ -86,6 +86,21 @@ export async function ensureAuthenticated() {
   setTimeout(() => (els.gateName.value && required ? els.gatePassword : els.gateName).focus(), 50);
 
   return new Promise((resolve) => {
+    let settled = false;
+    const cleanup = () => {
+      els.gateForm.removeEventListener('submit', onSubmit);
+      if (signal) signal.removeEventListener('abort', onAbort);
+    };
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    // A superseded navigation aborts the wait so the submit listener does not
+    // leak or fire for a view that is no longer mounted.
+    const onAbort = () => finish(false);
+
     const onSubmit = async (e) => {
       e.preventDefault();
       const name = els.gateName.value.trim().slice(0, 40);
@@ -112,14 +127,17 @@ export async function ensureAuthenticated() {
         storage.setName(name);
         els.gateEl.classList.add('hidden');
         els.gateError.textContent = '';
-        els.gateForm.removeEventListener('submit', onSubmit);
-        resolve(true);
+        finish(true);
       } catch (err) {
         els.gateError.textContent = 'Network error: ' + (err && err.message ? err.message : err);
       } finally {
         els.gateSubmit.disabled = false;
       }
     };
+    if (signal) {
+      if (signal.aborted) return void finish(false);
+      signal.addEventListener('abort', onAbort);
+    }
     els.gateForm.addEventListener('submit', onSubmit);
   });
 }

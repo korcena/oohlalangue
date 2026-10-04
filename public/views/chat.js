@@ -214,30 +214,9 @@ export function mount(container, ctx) {
     return false;
   }
 
-  // ---- Learned-profile storage (behaviour from the original) ----
-  function getProfile() {
-    return storage.getProfile();
-  }
-  function setProfile(list) {
-    storage.setProfile(list);
-  }
-  function addProfileFacts(newFacts) {
-    if (!newFacts || !newFacts.length) return;
-    const existing = getProfile();
-    const seen = new Set(existing.map((s) => s.toLowerCase()));
-    for (const f of newFacts) {
-      const clean = String(f)
-        .replace(/[`<>{}\[\]"]/g, '')
-        .trim()
-        .slice(0, 120);
-      if (!clean) continue;
-      const key = clean.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      existing.push(clean);
-    }
-    setProfile(existing.slice(-40));
-  }
+  // ---- Learned-profile storage (delegates to the shared module) ----
+  const getProfile = () => storage.getProfile();
+  const addProfileFacts = (newFacts) => storage.addProfileFacts(newFacts);
 
   // Extract and strip a hidden <note>...</note> block from teacher text.
   function extractNote(text) {

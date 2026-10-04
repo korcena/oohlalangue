@@ -24,7 +24,8 @@ const browserGlobals = {
   Event: 'readonly',
   HTMLElement: 'readonly',
   Audio: 'readonly',
-  confirm: 'readonly'
+  confirm: 'readonly',
+  AbortController: 'readonly'
 };
 
 const nodeGlobals = {

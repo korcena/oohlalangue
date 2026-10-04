@@ -313,7 +313,9 @@ test('POST /api/chat returns text and preserves the request contract', async () 
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.text, 'Bonjour Kate !');
-    assert.ok(body.raw);
+    // Provider/model details must not cross the boundary into the client.
+    assert.equal(body.raw, undefined);
+    assert.deepEqual(Object.keys(body), ['text']);
   });
 });
 
@@ -550,6 +552,68 @@ test('POST /api/tts maps male/female speaker labels to legal OpenAI voices', asy
     // Every voice sent to OpenAI is a legal voice name.
     const LEGAL = new Set(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', 'coral', 'sage', 'ash', 'ballad', 'verse']);
     for (const v of voicesUsed) assert.ok(LEGAL.has(v), `${v} must be a legal OpenAI voice`);
+  });
+});
+
+test('POST /api/tts gives distinct voices to same-gender speakers', async () => {
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, 'AUDIO', 'audio/mpeg'));
+  const app = createApp({
+    httpRequest: fetchImpl,
+    env: { OPENAI_API_KEY: 'sk', OPENAI_TTS_VOICE_MALE: 'onyx', OPENAI_TTS_VOICE_FEMALE: 'nova' }
+  });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/tts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        utterances: [
+          { speaker: 'Marie', text: 'Bonjour' },
+          { speaker: 'Sophie', text: 'Salut' }
+        ],
+        speakers: [
+          { name: 'Marie', voice: 'female' },
+          { name: 'Sophie', voice: 'female' }
+        ]
+      })
+    });
+    assert.equal(res.status, 200);
+    const voicesUsed = fetchImpl.calls.map((c) => c.body.voice);
+    assert.equal(voicesUsed.length, 2);
+    assert.notEqual(voicesUsed[0], voicesUsed[1], 'same-gender speakers must not share a voice');
+  });
+});
+
+test('POST /api/tts validates env voice overrides and never forwards an illegal voice', async () => {
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, 'AUDIO', 'audio/mpeg'));
+  const app = createApp({
+    httpRequest: fetchImpl,
+    env: {
+      OPENAI_API_KEY: 'sk',
+      OPENAI_TTS_VOICE: 'not-a-voice',
+      OPENAI_TTS_VOICE_MALE: 'also-bogus',
+      OPENAI_TTS_VOICE_FEMALE: 'bogus-too'
+    }
+  });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/tts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        utterances: [
+          { speaker: 'Marie', text: 'Bonjour' },
+          { speaker: 'Paul', text: 'Salut' }
+        ],
+        speakers: [
+          { name: 'Marie', voice: 'female' },
+          { name: 'Paul', voice: 'male' }
+        ]
+      })
+    });
+    assert.equal(res.status, 200);
+    const LEGAL = new Set(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', 'coral', 'sage', 'ash', 'ballad', 'verse']);
+    for (const call of fetchImpl.calls) {
+      assert.ok(LEGAL.has(call.body.voice), `${call.body.voice} must be a legal OpenAI voice`);
+    }
   });
 });
 

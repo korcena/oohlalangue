@@ -29,6 +29,7 @@ let currentView = null;
 let currentCleanup = null;
 let currentRoute = null;
 let mountToken = 0;
+let gateAbort = null;
 
 export function normalizeHash(hash) {
   let path = String(hash || '').replace(/^#/, '');
@@ -128,7 +129,9 @@ async function handleRoute() {
 
   // Optional APP_PASSWORD gate for gated views (the server is authoritative).
   if (route.gated) {
-    const allowed = await ensureAuthenticated();
+    if (gateAbort) gateAbort.abort();
+    gateAbort = new AbortController();
+    const allowed = await ensureAuthenticated(gateAbort.signal);
     if (token !== mountToken) return;
     if (!allowed) return;
   }

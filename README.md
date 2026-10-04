@@ -71,6 +71,9 @@ See `.env.example` for the secret-free template.
 The chat session limit (10 answers, then a 3-hour pause) is a hardcoded client behavior preserved
 from the original app; it is intentionally not configurable.
 
+Optional advanced overrides (built-in defaults in parentheses): `AI_TIMEOUT_MS` (30000),
+`TTS_TIMEOUT_MS` (45000), `WORKSHEET_MAX_TOKENS` (3000), `FEEDBACK_MAX_TOKENS` (3000).
+
 `GET /health` reports which providers are configured **as booleans only** — it never returns a
 key. The model name is never hardcoded into prompts.
 

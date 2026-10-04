@@ -685,6 +685,7 @@ The object MUST match this shape exactly:
           "prompt": "The question in French (with a short English hint if helpful)",
           "type": "short_text | choice | fill_blank | translation",
           "options": ["only for choice questions"],
+          "hint": "optional short English nudge to help the learner without giving the answer",
           "answer": "the expected answer (hidden until the learner reveals it)",
           "explanation": "short English explanation of the answer"
         }
@@ -754,6 +755,7 @@ function validateWorksheet(value) {
   }
 
   const seenSectionIds = new Set();
+  const seenQuestionIds = new Set();
   value.sections.forEach((section, si) => {
     const where = `sections[${si}]`;
     if (!section || typeof section !== 'object' || Array.isArray(section)) {
@@ -806,7 +808,13 @@ function validateWorksheet(value) {
         errors.push(`${qWhere} must be an object`);
         return;
       }
-      if (typeof q.id !== 'string' || !q.id.trim()) errors.push(`${qWhere}.id must be a non-empty string`);
+      if (typeof q.id !== 'string' || !q.id.trim()) {
+        errors.push(`${qWhere}.id must be a non-empty string`);
+      } else if (seenQuestionIds.has(q.id)) {
+        errors.push(`${qWhere}.id duplicates another question (${q.id})`);
+      } else {
+        seenQuestionIds.add(q.id);
+      }
       if (typeof q.prompt !== 'string' || !q.prompt.trim()) errors.push(`${qWhere}.prompt must be a non-empty string`);
       if (!QUESTION_TYPES.includes(q.type)) errors.push(`${qWhere}.type must be one of ${QUESTION_TYPES.join(' | ')}`);
       if (q.type === 'choice') {
@@ -1054,13 +1062,15 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
     const system = buildSystemPrompt(name, isOpening, profile, Boolean(skipQuestion), Boolean(voiceMode));
 
     try {
-      const { text, raw } = await provider.chatCompletion({
+      // Only the reply text crosses the boundary: provider/model details stay
+      // server-side and are never shown in ordinary learning flows.
+      const { text } = await provider.chatCompletion({
         system,
         messages: trimmedMessages,
         maxTokens: 500,
         timeoutMs: Number(env.AI_TIMEOUT_MS) || 30000
       });
-      res.json({ text, raw });
+      res.json({ text });
     } catch (err) {
       console.error(`[${provider.name}] chat error:`, err && err.message ? err.message : err);
       sendProviderError(res, err);
@@ -1240,23 +1250,54 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
     }
 
     const model = env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
-    const defaultVoice = env.OPENAI_TTS_VOICE || 'alloy';
-    const maleVoice = env.OPENAI_TTS_VOICE_MALE || 'onyx';
-    const femaleVoice = env.OPENAI_TTS_VOICE_FEMALE || 'nova';
     // OpenAI TTS accepts a fixed set of voice names. The worksheet prompt asks
     // for "male"/"female"; map those (and be lenient for legacy raw values) to
     // legal voices so a dialogue never sends an invalid voice to the API.
     const OPENAI_TTS_VOICES = new Set([
       'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', 'coral', 'sage', 'ash', 'ballad', 'verse'
     ]);
-    const voiceFor = (name) => {
+    // Validate env overrides too: a misconfigured voice must never be forwarded.
+    const legalVoice = (value, fallback) => {
+      const v = String(value || '').trim().toLowerCase();
+      return OPENAI_TTS_VOICES.has(v) ? v : fallback;
+    };
+    const defaultVoice = legalVoice(env.OPENAI_TTS_VOICE, 'alloy');
+    // Per-gender pools so distinct same-gender speakers do not collapse to one
+    // voice. The env value seeds the pool; further same-gender speakers cycle
+    // through the remaining legal voices.
+    const malePool = [legalVoice(env.OPENAI_TTS_VOICE_MALE, 'onyx'), 'echo', 'fable', 'ash'].filter(
+      (v, i, a) => a.indexOf(v) === i
+    );
+    const femalePool = [legalVoice(env.OPENAI_TTS_VOICE_FEMALE, 'nova'), 'shimmer', 'coral', 'sage'].filter(
+      (v, i, a) => a.indexOf(v) === i
+    );
+    const genderFor = (name) => {
       const match = (Array.isArray(speakers) ? speakers : []).find((s) => s && s.name === name);
       const raw = String((match && match.voice) || '').trim().toLowerCase();
-      if (raw === 'male' || raw === 'homme' || raw === 'h') return maleVoice;
-      if (raw === 'female' || raw === 'femme' || raw === 'f') return femaleVoice;
-      if (OPENAI_TTS_VOICES.has(raw)) return raw;
-      return defaultVoice;
+      if (raw === 'male' || raw === 'homme' || raw === 'h') return 'male';
+      if (raw === 'female' || raw === 'femme' || raw === 'f') return 'female';
+      return null;
     };
+    // Assign a distinct voice per distinct speaker name; same-gender speakers
+    // advance to the next voice in their pool.
+    const voiceAssignments = new Map();
+    const counters = { male: 0, female: 0, other: 0 };
+    for (const speaker of Array.isArray(speakers) ? speakers : []) {
+      if (!speaker || typeof speaker.name !== 'string') continue;
+      if (voiceAssignments.has(speaker.name)) continue;
+      const gender = genderFor(speaker.name);
+      const raw = String(speaker.voice || '').trim().toLowerCase();
+      if (gender === 'male') {
+        voiceAssignments.set(speaker.name, malePool[counters.male++ % malePool.length]);
+      } else if (gender === 'female') {
+        voiceAssignments.set(speaker.name, femalePool[counters.female++ % femalePool.length]);
+      } else if (OPENAI_TTS_VOICES.has(raw)) {
+        voiceAssignments.set(speaker.name, raw);
+      } else {
+        voiceAssignments.set(speaker.name, defaultVoice);
+      }
+    }
+    const voiceFor = (name) => voiceAssignments.get(name) || defaultVoice;
     const timeoutMs = Number(env.TTS_TIMEOUT_MS) || 45000;
 
     try {
