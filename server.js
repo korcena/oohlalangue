@@ -3,11 +3,10 @@ require('dotenv').config();
 const crypto = require('crypto');
 const express = require('express');
 const https = require('https');
+const http = require('http');
 const path = require('path');
 
-const app = express();
 const PORT = process.env.PORT || 3000;
-const APP_PASSWORD = process.env.APP_PASSWORD || '';
 
 // Constant-time string compare to avoid leaking password length via timing.
 function safeEqual(a, b) {
@@ -17,10 +16,10 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ab, bb);
 }
 
-function checkPassword(req) {
-  if (!APP_PASSWORD) return true; // gate disabled
+function checkPassword(req, appPassword) {
+  if (!appPassword) return true; // gate disabled
   const supplied = req.get('x-app-password') || (req.body && req.body.password) || '';
-  return supplied && safeEqual(supplied, APP_PASSWORD);
+  return Boolean(supplied) && safeEqual(supplied, appPassword);
 }
 
 // Keep the student's name safe for a system-prompt interpolation: trim,
@@ -355,126 +354,1017 @@ function trimHistory(messages, keep = 20) {
   return [first, ...tail];
 }
 
-// POST JSON to the Anthropic Messages API using Node's built-in https module,
-// so the server works on any Node version (no dependency on global fetch).
-function callAnthropic(apiKey, payload) {
+// ---------------------------------------------------------------------------
+// HTTP transport
+//
+// One shared transport is used for every outbound provider call so behaviour
+// is identical across Node versions (no dependency on global fetch) and so
+// tests can inject a mock. `httpRequest` resolves with the raw response and
+// never throws for non-2xx statuses — callers classify the status.
+// ---------------------------------------------------------------------------
+
+function defaultHttpRequest({ method = 'POST', url, headers = {}, body, timeoutMs = 30000 }) {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify(payload);
-    const req = https.request(
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch (_e) {
+      reject(new Error('Invalid provider URL: ' + url));
+      return;
+    }
+    const lib = parsed.protocol === 'http:' ? http : https;
+    const payload =
+      body == null
+        ? null
+        : Buffer.isBuffer(body)
+          ? body
+          : typeof body === 'string'
+            ? body
+            : JSON.stringify(body);
+
+    const reqHeaders = Object.assign({}, headers);
+    if (payload && !Object.keys(reqHeaders).some((k) => k.toLowerCase() === 'content-length')) {
+      reqHeaders['Content-Length'] = Buffer.byteLength(payload);
+    }
+
+    const req = lib.request(
       {
-        method: 'POST',
-        hostname: 'api.anthropic.com',
-        path: '/v1/messages',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01'
-        }
+        method,
+        hostname: parsed.hostname,
+        port: parsed.port || undefined,
+        path: parsed.pathname + parsed.search,
+        headers: reqHeaders
       },
       (response) => {
         const chunks = [];
         response.on('data', (c) => chunks.push(c));
         response.on('end', () => {
-          const raw = Buffer.concat(chunks).toString('utf8');
-          let parsed;
-          try {
-            parsed = raw ? JSON.parse(raw) : {};
-          } catch (_e) {
-            parsed = { error: { message: raw || 'Empty response from Anthropic' } };
-          }
-          resolve({ status: response.statusCode || 500, data: parsed });
+          resolve({
+            status: response.statusCode || 500,
+            headers: response.headers || {},
+            buffer: Buffer.concat(chunks)
+          });
         });
       }
     );
-    req.on('error', reject);
-    req.write(body);
+
+    req.on('error', (err) => {
+      const wrapped = new Error(err && err.message ? err.message : String(err));
+      wrapped.code = err && err.code ? err.code : 'ENETWORK';
+      reject(wrapped);
+    });
+
+    req.setTimeout(timeoutMs, () => {
+      const err = new Error(`Provider request timed out after ${timeoutMs}ms`);
+      err.code = 'ETIMEDOUT';
+      req.destroy(err);
+    });
+
+    if (payload) req.write(payload);
     req.end();
   });
 }
 
-app.use(express.json({ limit: '1mb' }));
-app.use(express.static(__dirname));
+// ---------------------------------------------------------------------------
+// Provider abstraction
+//
+// TEXT_PROVIDER selects the text provider server-side only. Keys are read
+// from the server environment and are never logged or returned to the client.
+// ---------------------------------------------------------------------------
 
-// Silence the /favicon.ico 404 in dev.
-app.get('/favicon.ico', (_req, res) => res.status(204).end());
+class ProviderError extends Error {
+  constructor(message, { status = 502, transient = false, upstream = null, data = null } = {}) {
+    super(message);
+    this.name = 'ProviderError';
+    this.status = status;
+    this.transient = transient;
+    this.upstream = upstream;
+    this.data = data;
+  }
+}
 
-// Tell the client whether a password is required (so it can show the login screen).
-app.get('/api/auth', (_req, res) => {
-  res.json({ required: Boolean(APP_PASSWORD) });
-});
+function parseJsonText(raw) {
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch (_e) {
+    return { error: { message: raw || 'Empty response from provider' } };
+  }
+}
 
-// Verify a submitted password. Returns 200 on success, 401 on failure.
-app.post('/api/auth', (req, res) => {
-  if (!APP_PASSWORD) return res.json({ ok: true, required: false });
-  if (checkPassword(req)) return res.json({ ok: true, required: true });
-  return res.status(401).json({ error: { message: 'Incorrect password' } });
-});
+function extractProviderMessage(data) {
+  if (!data) return '';
+  if (typeof data === 'string') return data;
+  if (data.error) {
+    if (typeof data.error === 'string') return data.error;
+    if (data.error.message) return String(data.error.message);
+  }
+  if (data.message && typeof data.message === 'string') return data.message;
+  return '';
+}
 
-app.post('/api/chat', async (req, res) => {
-  if (!checkPassword(req)) {
-    return res.status(401).json({ error: { message: 'Incorrect or missing password' } });
+function extractOllamaText(data) {
+  if (!data) return '';
+  if (data.message && typeof data.message.content === 'string') return data.message.content.trim();
+  if (typeof data.response === 'string') return data.response.trim();
+  return '';
+}
+
+function extractOpenAIText(data) {
+  if (!data || !Array.isArray(data.choices) || !data.choices.length) return '';
+  const choice = data.choices[0] || {};
+  if (choice.message && typeof choice.message.content === 'string') return choice.message.content.trim();
+  if (typeof choice.text === 'string') return choice.text.trim();
+  return '';
+}
+
+// Exactly one retry on transient failures (network error / timeout / 5xx).
+// 4xx is surfaced immediately without a retry.
+async function withOneRetry(task) {
+  try {
+    return await task();
+  } catch (err) {
+    if (!err || !err.transient) throw err;
+    return task();
+  }
+}
+
+async function rawRequest({ httpRequest, url, headers, body, timeoutMs, label }) {
+  try {
+    return await httpRequest({ method: 'POST', url, headers, body, timeoutMs });
+  } catch (err) {
+    throw new ProviderError(`${label} request failed: ${err && err.message ? err.message : err}`, {
+      status: 502,
+      transient: true,
+      data: { code: err && err.code }
+    });
+  }
+}
+
+async function requestJson({ httpRequest, url, headers, body, timeoutMs, label }) {
+  const res = await rawRequest({ httpRequest, url, headers, body, timeoutMs, label });
+  const raw = res.buffer ? res.buffer.toString('utf8') : '';
+  const data = parseJsonText(raw);
+  if (res.status >= 500) {
+    throw new ProviderError(`${label} upstream error (${res.status})`, {
+      status: 502,
+      transient: true,
+      upstream: res.status,
+      data
+    });
+  }
+  if (res.status < 200 || res.status >= 300) {
+    throw new ProviderError(extractProviderMessage(data) || `${label} returned ${res.status}`, {
+      status: res.status,
+      transient: false,
+      data
+    });
+  }
+  return { status: res.status, data };
+}
+
+async function requestBinary({ httpRequest, url, headers, body, timeoutMs, label }) {
+  const res = await rawRequest({ httpRequest, url, headers, body, timeoutMs, label });
+  if (res.status >= 500) {
+    throw new ProviderError(`${label} upstream error (${res.status})`, {
+      status: 502,
+      transient: true,
+      upstream: res.status
+    });
+  }
+  if (res.status < 200 || res.status >= 300) {
+    const data = parseJsonText(res.buffer ? res.buffer.toString('utf8') : '');
+    throw new ProviderError(extractProviderMessage(data) || `${label} returned ${res.status}`, {
+      status: res.status,
+      transient: false,
+      data
+    });
+  }
+  const mime = (res.headers && (res.headers['content-type'] || res.headers['Content-Type'])) || 'audio/mpeg';
+  return { status: res.status, buffer: res.buffer || Buffer.alloc(0), mime: String(mime).split(';')[0] };
+}
+
+function makeProviders({ httpRequest = defaultHttpRequest, env = process.env } = {}) {
+  const ollama = {
+    name: 'ollama',
+    isConfigured() {
+      return Boolean(env.OLLAMA_API_KEY);
+    },
+    isModelConfigured() {
+      return Boolean(env.OLLAMA_MODEL);
+    },
+    missingMessage() {
+      return 'OLLAMA_API_KEY is not set. Add OLLAMA_API_KEY and OLLAMA_MODEL to your .env and restart the server (see .env.example), or set TEXT_PROVIDER=openai with OPENAI_API_KEY.';
+    },
+    async chatCompletion({ system, messages, maxTokens = 800, timeoutMs = 30000 }) {
+      if (!env.OLLAMA_API_KEY) throw new ProviderError(ollama.missingMessage(), { status: 500 });
+      if (!env.OLLAMA_MODEL) {
+        throw new ProviderError(
+          'OLLAMA_MODEL is not set. Set the model name available to your Ollama Cloud account in .env (see .env.example) and restart the server.',
+          { status: 500 }
+        );
+      }
+      const url = env.OLLAMA_BASE_URL || 'https://ollama.com/api/chat';
+      const chatMessages = system ? [{ role: 'system', content: system }, ...(messages || [])] : messages || [];
+      const { data } = await withOneRetry(() =>
+        requestJson({
+          httpRequest,
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${env.OLLAMA_API_KEY}`
+          },
+          body: { model: env.OLLAMA_MODEL, stream: false, messages: chatMessages, options: { num_predict: maxTokens } },
+          timeoutMs,
+          label: 'Ollama'
+        })
+      );
+      const text = extractOllamaText(data);
+      if (!text) {
+        throw new ProviderError('Ollama returned an empty response.', { status: 502, transient: true, data });
+      }
+      return { text, raw: data };
+    }
+  };
+
+  const openai = {
+    name: 'openai',
+    isConfigured() {
+      return Boolean(env.OPENAI_API_KEY);
+    },
+    isModelConfigured() {
+      return Boolean(env.OPENAI_MODEL);
+    },
+    missingMessage() {
+      return 'OPENAI_API_KEY is not set. Add OPENAI_API_KEY and OPENAI_MODEL to your .env and restart the server (see .env.example), or set TEXT_PROVIDER=ollama with OLLAMA_API_KEY.';
+    },
+    async chatCompletion({ system, messages, maxTokens = 800, timeoutMs = 30000 }) {
+      if (!env.OPENAI_API_KEY) throw new ProviderError(openai.missingMessage(), { status: 500 });
+      if (!env.OPENAI_MODEL) {
+        throw new ProviderError(
+          'OPENAI_MODEL is not set. Set the OpenAI text model name in .env (see .env.example) and restart the server.',
+          { status: 500 }
+        );
+      }
+      const chatMessages = system ? [{ role: 'system', content: system }, ...(messages || [])] : messages || [];
+      const { data } = await withOneRetry(() =>
+        requestJson({
+          httpRequest,
+          url: 'https://api.openai.com/v1/chat/completions',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${env.OPENAI_API_KEY}`
+          },
+          body: { model: env.OPENAI_MODEL, messages: chatMessages, max_tokens: maxTokens },
+          timeoutMs,
+          label: 'OpenAI'
+        })
+      );
+      const text = extractOpenAIText(data);
+      if (!text) {
+        throw new ProviderError('OpenAI returned an empty response.', { status: 502, transient: true, data });
+      }
+      return { text, raw: data };
+    }
+  };
+
+  return { ollama, openai };
+}
+
+function selectProvider(env = process.env, deps = {}) {
+  const providers = deps.providers || makeProviders({ env, ...deps });
+  const requested = String(env.TEXT_PROVIDER || 'ollama')
+    .trim()
+    .toLowerCase();
+  const provider = providers[requested];
+  if (!provider) {
+    throw new ProviderError(
+      `Unknown TEXT_PROVIDER "${env.TEXT_PROVIDER}". Use "ollama" (default) or "openai".`,
+      { status: 500 }
+    );
+  }
+  return provider;
+}
+
+// ---------------------------------------------------------------------------
+// Structured output: worksheet contract (see design spec §9)
+//
+// TRUST MODEL — INTENTIONAL, NOT A SECURITY BOUNDARY:
+// This is a personal practice tool, not a secure exam. The `/api/generate`
+// payload contains each question's `answer` and the listening `script`
+// because the browser must be able to reveal them after self-practice and
+// because there is no server-side grading secrecy. Hiding is a UI concern:
+// `public/views/worksheet.js` must not render these values into the DOM until
+// the learner reveals/submits. They are trivially visible in DevTools.
+// ---------------------------------------------------------------------------
+
+const WORKSHEET_SECTION_IDS = ['listening', 'reading', 'translation_grammar', 'writing'];
+const QUESTION_TYPES = ['short_text', 'choice', 'fill_blank', 'translation'];
+const FEEDBACK_VERDICTS = ['correct', 'mistake', 'alternative'];
+const FEEDBACK_ERROR_TYPES = ['error', 'style', 'alternative'];
+
+const WORKSHEET_SYSTEM_PROMPT = `You are an experienced A1 (beginner) French teacher writing a short practice worksheet.
+You MUST reply with a SINGLE valid JSON object and NOTHING else: no markdown fences, no explanations, no trailing text.
+
+The object MUST match this shape exactly:
+{
+  "topic": "string",
+  "level": "A1",
+  "sections": [
+    {
+      "id": "listening | reading | translation_grammar | writing",
+      "title_fr": "French section title",
+      "explanation_en": "One short English sentence explaining the task",
+      "audio": {
+        "script": "The full spoken French script",
+        "speakers": [{ "name": "A", "voice": "female" }],
+        "cache_key": "leave empty; the server computes it"
+      },
+      "questions": [
+        {
+          "id": "unique-string-id",
+          "prompt": "The question in French (with a short English hint if helpful)",
+          "type": "short_text | choice | fill_blank | translation",
+          "options": ["only for choice questions"],
+          "answer": "the expected answer (hidden until the learner reveals it)",
+          "explanation": "short English explanation of the answer"
+        }
+      ]
+    }
+  ]
+}
+
+HARD RULES:
+- Use only these section ids: listening, reading, translation_grammar, writing.
+- The "audio" block MUST appear ONLY on the "listening" section. Never put it on other sections.
+- Every listening section MUST have a non-empty "script" written entirely in simple A1 French and at least one speaker in "speakers". If the script is a dialogue between different people, list each distinct speaker with a distinct "voice" value so they can be voiced separately. Questions must be answerable using the audio alone.
+- Every question MUST have: id, prompt, type, answer, explanation. "options" is REQUIRED when type is "choice" and must be omitted otherwise.
+- "answer" is the model answer / answer key. It is delivered to the client by design but hidden in the UI until reveal.
+- Keep vocabulary and grammar at A1 level. Use short sentences.
+- Titles in French, explanations in English.
+- Do not add any keys other than those shown.`;
+
+function lengthToCounts(length) {
+  const key = String(length || 'medium').toLowerCase();
+  if (key === 'short') return { reading: 3, translation_grammar: 3, writing: 1, listening: 2 };
+  if (key === 'long') return { reading: 6, translation_grammar: 6, writing: 2, listening: 4 };
+  return { reading: 4, translation_grammar: 4, writing: 1, listening: 3 };
+}
+
+function buildWorksheetPrompt({ topic, level = 'A1', length = 'medium', includeListening = true, name, profile } = {}) {
+  const counts = lengthToCounts(length);
+  const safeLevel = sanitizeFact(level) || 'A1';
+  const safeTopic = sanitizeFact(topic) || 'daily life at A1 level';
+  const learner = sanitizeName(name) || 'a learner';
+  const facts = sanitizeProfile(profile);
+  const lines = [];
+  lines.push(`Create a ${safeLevel} French practice worksheet about: "${safeTopic}".`);
+  lines.push(`The learner is ${learner}.`);
+  if (facts.length) lines.push(`Known about the learner: ${facts.join('; ')}.`);
+  lines.push('');
+  lines.push('Include these sections, in this order:');
+  if (includeListening) {
+    lines.push(`- listening (Compréhension orale): an original French mini-dialogue or narration (${counts.listening} comprehension questions).`);
+  }
+  lines.push(`- reading (Compréhension écrite): a short A1 French text with ${counts.reading} questions.`);
+  lines.push(`- translation_grammar (Grammaire et traduction): ${counts.translation_grammar} translation or fill-in-the-blank items.`);
+  lines.push(`- writing (Expression écrite): ${counts.writing} short writing task(s).`);
+  lines.push('');
+  lines.push('Respond with ONLY the JSON object described in the system instructions.');
+  return lines.join('\n');
+}
+
+function buildWorksheetRepairPrompt(errors) {
+  return `Your previous response was rejected because:
+- ${(errors || ['unknown error']).join('\n- ')}
+
+Return the corrected worksheet as a SINGLE valid JSON object only. No markdown fences, no commentary. Fix every listed problem.`;
+}
+
+function validateWorksheet(value) {
+  const errors = [];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, errors: ['worksheet must be a JSON object'] };
+  }
+  if (typeof value.topic !== 'string' || !value.topic.trim()) errors.push('topic must be a non-empty string');
+  if (value.level != null && typeof value.level !== 'string') errors.push('level must be a string when present');
+  if (!Array.isArray(value.sections) || value.sections.length === 0) {
+    errors.push('sections must be a non-empty array');
+    return { ok: false, errors };
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({
-      error: {
-        message:
-          'ANTHROPIC_API_KEY is not set. Create a .env file with ANTHROPIC_API_KEY=sk-ant-... and restart the server.'
+  const seenSectionIds = new Set();
+  value.sections.forEach((section, si) => {
+    const where = `sections[${si}]`;
+    if (!section || typeof section !== 'object' || Array.isArray(section)) {
+      errors.push(`${where} must be an object`);
+      return;
+    }
+    if (!WORKSHEET_SECTION_IDS.includes(section.id)) {
+      errors.push(`${where}.id must be one of ${WORKSHEET_SECTION_IDS.join(' | ')}`);
+    } else if (seenSectionIds.has(section.id)) {
+      errors.push(`${where}.id duplicates another section (${section.id})`);
+    } else {
+      seenSectionIds.add(section.id);
+    }
+    if (typeof section.title_fr !== 'string' || !section.title_fr.trim()) errors.push(`${where}.title_fr must be a non-empty string`);
+    if (typeof section.explanation_en !== 'string' || !section.explanation_en.trim()) {
+      errors.push(`${where}.explanation_en must be a non-empty string`);
+    }
+
+    const isListening = section.id === 'listening';
+    if (isListening) {
+      const audio = section.audio;
+      if (!audio || typeof audio !== 'object' || Array.isArray(audio)) {
+        errors.push(`${where}.audio is required for the listening section`);
+      } else {
+        if (typeof audio.script !== 'string' || !audio.script.trim()) errors.push(`${where}.audio.script must be a non-empty string`);
+        if (!Array.isArray(audio.speakers) || audio.speakers.length === 0) {
+          errors.push(`${where}.audio.speakers must be a non-empty array`);
+        } else {
+          audio.speakers.forEach((sp, spi) => {
+            if (!sp || typeof sp !== 'object') {
+              errors.push(`${where}.audio.speakers[${spi}] must be an object`);
+              return;
+            }
+            if (typeof sp.name !== 'string' || !sp.name.trim()) errors.push(`${where}.audio.speakers[${spi}].name must be a non-empty string`);
+            if (typeof sp.voice !== 'string' || !sp.voice.trim()) errors.push(`${where}.audio.speakers[${spi}].voice must be a non-empty string`);
+          });
+        }
+      }
+    } else if (section.audio != null) {
+      errors.push(`${where}.audio must only appear on the listening section`);
+    }
+
+    if (!Array.isArray(section.questions) || section.questions.length === 0) {
+      errors.push(`${where}.questions must be a non-empty array`);
+      return;
+    }
+    section.questions.forEach((q, qi) => {
+      const qWhere = `${where}.questions[${qi}]`;
+      if (!q || typeof q !== 'object' || Array.isArray(q)) {
+        errors.push(`${qWhere} must be an object`);
+        return;
+      }
+      if (typeof q.id !== 'string' || !q.id.trim()) errors.push(`${qWhere}.id must be a non-empty string`);
+      if (typeof q.prompt !== 'string' || !q.prompt.trim()) errors.push(`${qWhere}.prompt must be a non-empty string`);
+      if (!QUESTION_TYPES.includes(q.type)) errors.push(`${qWhere}.type must be one of ${QUESTION_TYPES.join(' | ')}`);
+      if (q.type === 'choice') {
+        if (!Array.isArray(q.options) || q.options.length === 0) {
+          errors.push(`${qWhere}.options must be a non-empty array for choice questions`);
+        } else if (!q.options.every((o) => typeof o === 'string')) {
+          errors.push(`${qWhere}.options must contain only strings`);
+        }
+      }
+      if (typeof q.answer !== 'string' || !q.answer.trim()) errors.push(`${qWhere}.answer must be a non-empty string`);
+      if (typeof q.explanation !== 'string' || !q.explanation.trim()) errors.push(`${qWhere}.explanation must be a non-empty string`);
+    });
+  });
+
+  return { ok: errors.length === 0, errors };
+}
+
+// Compute a stable cache key from the script and speaker voices. The same
+// canonicalization is used by the client's IndexedDB cache so a resumed
+// worksheet hits the cache instead of re-billing TTS.
+function worksheetAudioKey(script, speakers) {
+  const voices = (speakers || []).map((s) => `${s.name}:${s.voice}`).join(',');
+  const canonical = `${String(script || '').replace(/\s+/g, ' ').trim()}|${voices}`;
+  return crypto.createHash('sha256').update(canonical).digest('hex').slice(0, 32);
+}
+
+function normalizeWorksheet(value) {
+  const out = Object.assign({}, value);
+  out.topic = typeof out.topic === 'string' ? out.topic : '';
+  out.level = typeof out.level === 'string' && out.level ? out.level : 'A1';
+  out.sections = (Array.isArray(out.sections) ? out.sections : []).map((section) => {
+    const sec = Object.assign({}, section);
+    sec.questions = (Array.isArray(sec.questions) ? sec.questions : []).map((q) => Object.assign({}, q));
+    if (sec.id === 'listening' && sec.audio && typeof sec.audio === 'object') {
+      sec.audio = Object.assign({}, sec.audio);
+      sec.audio.cache_key = worksheetAudioKey(sec.audio.script, sec.audio.speakers);
+    }
+    return sec;
+  });
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Structured output: feedback contract (see design spec §9)
+// ---------------------------------------------------------------------------
+
+function buildFeedbackPrompt(worksheet, answersMap) {
+  const sections = (worksheet && worksheet.sections) || [];
+  const lines = [];
+  lines.push(`You are correcting an A1 French worksheet. Topic: "${(worksheet && worksheet.topic) || 'unknown'}".`);
+  lines.push('');
+  lines.push('Worksheet and learner answers:');
+  for (const section of sections) {
+    lines.push(`## Section ${section.id} — ${section.title_fr || ''}`);
+    if (section.id === 'listening' && section.audio && section.audio.script) {
+      lines.push(`Listening script (use it to judge the listening answers): ${section.audio.script}`);
+    }
+    for (const q of section.questions || []) {
+      const original = Object.prototype.hasOwnProperty.call(answersMap, q.id) ? answersMap[q.id] : '';
+      lines.push(`- question_id: ${q.id}`);
+      lines.push(`  prompt: ${q.prompt}`);
+      lines.push(`  expected answer: ${q.answer}`);
+      lines.push(`  learner answer: ${original}`);
+    }
+    lines.push('');
+  }
+  lines.push('Return ONLY a single valid JSON object with this shape:');
+  lines.push('{');
+  lines.push('  "answers": [');
+  lines.push('    { "question_id": "string", "original": "the learner answer, copied exactly", "verdict": "correct|mistake|alternative", "correction": "string", "explanation": "string", "error_type": "error|style|alternative" }');
+  lines.push('  ],');
+  lines.push('  "summary": { "strengths": ["..."], "recurring_mistakes": ["..."], "priorities": ["..."], "follow_up": "string" }');
+  lines.push('}');
+  lines.push('Rules: verdict must be one of correct|mistake|alternative. error_type must be one of error|style|alternative. Copy each learner answer into "original" exactly as given. Be encouraging, concise and use simple English.');
+  return lines.join('\n');
+}
+
+function buildFeedbackRepairPrompt(errors) {
+  return `Your previous feedback response was rejected because:
+- ${(errors || ['unknown error']).join('\n- ')}
+
+Return the corrected feedback as a SINGLE valid JSON object only. Use only the exact verdict and error_type values allowed. No commentary.`;
+}
+
+function validateFeedback(value) {
+  const errors = [];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, errors: ['feedback must be a JSON object'] };
+  }
+  if (!Array.isArray(value.answers)) {
+    errors.push('answers must be an array');
+  } else {
+    value.answers.forEach((a, i) => {
+      const where = `answers[${i}]`;
+      if (!a || typeof a !== 'object' || Array.isArray(a)) {
+        errors.push(`${where} must be an object`);
+        return;
+      }
+      if (typeof a.question_id !== 'string' || !a.question_id.trim()) errors.push(`${where}.question_id must be a non-empty string`);
+      if (typeof a.original !== 'string') errors.push(`${where}.original must be a string`);
+      if (!FEEDBACK_VERDICTS.includes(a.verdict)) errors.push(`${where}.verdict must be one of ${FEEDBACK_VERDICTS.join(' | ')}`);
+      if (typeof a.correction !== 'string' || !a.correction.trim()) errors.push(`${where}.correction must be a non-empty string`);
+      if (typeof a.explanation !== 'string' || !a.explanation.trim()) errors.push(`${where}.explanation must be a non-empty string`);
+      if (!FEEDBACK_ERROR_TYPES.includes(a.error_type)) {
+        errors.push(`${where}.error_type must be one of ${FEEDBACK_ERROR_TYPES.join(' | ')}`);
       }
     });
   }
-
-  const { messages, name, profile, skipQuestion, voiceMode } = req.body || {};
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ error: { message: 'messages must be a non-empty array' } });
+  const summary = value.summary;
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) {
+    errors.push('summary must be an object');
+  } else {
+    for (const key of ['strengths', 'recurring_mistakes', 'priorities']) {
+      if (!Array.isArray(summary[key])) errors.push(`summary.${key} must be an array`);
+    }
+    if (typeof summary.follow_up !== 'string' || !summary.follow_up.trim()) {
+      errors.push('summary.follow_up must be a non-empty string');
+    }
   }
+  return { ok: errors.length === 0, errors };
+}
 
-  const isOpening = messages.length === 1;
-  const trimmedMessages = trimHistory(messages, 20);
+function normalizeAnswers(answers) {
+  const map = {};
+  if (!answers) return map;
+  if (Array.isArray(answers)) {
+    for (const item of answers) {
+      if (item && typeof item.question_id === 'string') map[item.question_id] = String(item.answer == null ? '' : item.answer);
+    }
+    return map;
+  }
+  if (typeof answers === 'object') {
+    for (const [k, v] of Object.entries(answers)) map[k] = String(v == null ? '' : v);
+  }
+  return map;
+}
 
+function extractJson(text) {
+  if (typeof text !== 'string') return null;
+  let s = text.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end === -1 || end < start) return null;
   try {
-    const { status, data } = await callAnthropic(apiKey, {
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
-      system: buildSystemPrompt(name, isOpening, profile, Boolean(skipQuestion), Boolean(voiceMode)),
-      messages: trimmedMessages
-    });
+    return JSON.parse(s.slice(start, end + 1));
+  } catch (_e) {
+    return null;
+  }
+}
 
-    if (status < 200 || status >= 300) {
-      console.error('Anthropic API error:', status, data);
-      return res.status(status).json(data);
+// ---------------------------------------------------------------------------
+// TTS helpers
+// ---------------------------------------------------------------------------
+
+const MAX_TTS_CHARS = 4000;
+const TTS_PAUSE_MS = 600;
+
+async function mapPool(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  let firstError = null;
+  const size = Math.max(1, Math.min(limit, items.length));
+  async function worker() {
+    for (;;) {
+      if (firstError) return;
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      try {
+        results[index] = await fn(items[index], index);
+      } catch (err) {
+        // Record the first error but let already-started tasks settle so no
+        // rejection is left unhandled.
+        if (!firstError) firstError = err;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: size }, () => worker()));
+  if (firstError) throw firstError;
+  return results;
+}
+
+function sendProviderError(res, err, fallbackStatus = 500) {
+  const status = err && err.status ? err.status : fallbackStatus;
+  const message = err && err.message ? err.message : String(err);
+  res.status(status).json({ error: { message } });
+}
+
+// ---------------------------------------------------------------------------
+// App factory
+// ---------------------------------------------------------------------------
+
+function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {}) {
+  const app = express();
+  const providers = makeProviders({ httpRequest, env });
+
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.static(path.join(__dirname, 'public')));
+
+  // Silence the /favicon.ico 404 in dev.
+  app.get('/favicon.ico', (_req, res) => res.status(204).end());
+
+  // Tell the client whether a password is required (so it can show the login screen).
+  app.get('/api/auth', (_req, res) => {
+    res.json({ required: Boolean(env.APP_PASSWORD) });
+  });
+
+  // Verify a submitted password. Returns 200 on success, 401 on failure.
+  app.post('/api/auth', (req, res) => {
+    if (!env.APP_PASSWORD) return res.json({ ok: true, required: false });
+    if (checkPassword(req, env.APP_PASSWORD)) return res.json({ ok: true, required: true });
+    return res.status(401).json({ error: { message: 'Incorrect password' } });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/chat — unchanged chat contract, routed through the provider.
+  // -------------------------------------------------------------------------
+  app.post('/api/chat', async (req, res) => {
+    if (!checkPassword(req, env.APP_PASSWORD)) {
+      return res.status(401).json({ error: { message: 'Incorrect or missing password' } });
     }
 
-    const text = (data.content || [])
-      .filter((block) => block && block.type === 'text')
-      .map((block) => block.text)
-      .join('\n')
-      .trim();
+    const { messages, name, profile, skipQuestion, voiceMode } = req.body || {};
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: { message: 'messages must be a non-empty array' } });
+    }
 
-    res.json({ text, raw: data });
-  } catch (err) {
-    const message = err && err.message ? err.message : String(err);
-    console.error('Server error talking to Anthropic:', err);
-    res.status(500).json({ error: { message } });
-  }
-});
+    let provider;
+    try {
+      provider = selectProvider(env, { providers });
+    } catch (err) {
+      return sendProviderError(res, err);
+    }
 
-app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
+    const isOpening = messages.length === 1;
+    const trimmedMessages = trimHistory(messages, 20);
+    const system = buildSystemPrompt(name, isOpening, profile, Boolean(skipQuestion), Boolean(voiceMode));
 
-app.listen(PORT, () => {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn(
-      '[warn] ANTHROPIC_API_KEY is not set. Create a .env file (see .env.example) before sending messages.'
-    );
-  }
-  if (APP_PASSWORD) {
-    console.log('[info] Password gate is ENABLED (APP_PASSWORD is set).');
-  } else {
-    console.log('[info] Password gate is DISABLED — set APP_PASSWORD in .env to require one.');
-  }
-  console.log(`Ooh La Langue running at http://localhost:${PORT}`);
-});
+    try {
+      const { text, raw } = await provider.chatCompletion({
+        system,
+        messages: trimmedMessages,
+        maxTokens: 500,
+        timeoutMs: Number(env.AI_TIMEOUT_MS) || 30000
+      });
+      res.json({ text, raw });
+    } catch (err) {
+      console.error(`[${provider.name}] chat error:`, err && err.message ? err.message : err);
+      sendProviderError(res, err);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/generate — structured worksheet JSON.
+  //
+  // The returned payload intentionally contains each question's `answer` and
+  // the listening `script` so the client can reveal them after self-practice.
+  // See the TRUST MODEL note above: this is not a secure exam and provides no
+  // server-side grading secrecy.
+  // -------------------------------------------------------------------------
+  app.post('/api/generate', async (req, res) => {
+    if (!checkPassword(req, env.APP_PASSWORD)) {
+      return res.status(401).json({ error: { message: 'Incorrect or missing password' } });
+    }
+
+    let provider;
+    try {
+      provider = selectProvider(env, { providers });
+    } catch (err) {
+      return sendProviderError(res, err);
+    }
+
+    const { topic, level = 'A1', length = 'medium', includeListening = true, name, profile } = req.body || {};
+    const userPrompt = buildWorksheetPrompt({ topic, level, length, includeListening, name, profile });
+    const timeoutMs = Number(env.AI_TIMEOUT_MS) || 45000;
+
+    try {
+      const first = await provider.chatCompletion({
+        system: WORKSHEET_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userPrompt }],
+        maxTokens: Number(env.WORKSHEET_MAX_TOKENS) || 3000,
+        timeoutMs
+      });
+
+      let parsed = extractJson(first.text);
+      let check = parsed ? validateWorksheet(parsed) : { ok: false, errors: ['response was not valid JSON'] };
+
+      if (!check.ok) {
+        const repaired = await provider.chatCompletion({
+          system: WORKSHEET_SYSTEM_PROMPT,
+          messages: [
+            { role: 'user', content: userPrompt },
+            { role: 'assistant', content: first.text || '' },
+            { role: 'user', content: buildWorksheetRepairPrompt(check.errors) }
+          ],
+          maxTokens: Number(env.WORKSHEET_MAX_TOKENS) || 3000,
+          timeoutMs
+        });
+        parsed = extractJson(repaired.text);
+        check = parsed ? validateWorksheet(parsed) : { ok: false, errors: ['repair response was not valid JSON'] };
+        if (!check.ok) {
+          console.error('[generate] invalid worksheet after repair:', check.errors);
+          return res.status(502).json({
+            error: {
+              message: 'The model did not return a valid worksheet after one repair attempt. Please try again.'
+            }
+          });
+        }
+      }
+
+      res.json(normalizeWorksheet(parsed));
+    } catch (err) {
+      console.error(`[${provider.name}] generate error:`, err && err.message ? err.message : err);
+      sendProviderError(res, err);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/feedback — structured per-answer feedback + summary.
+  // -------------------------------------------------------------------------
+  app.post('/api/feedback', async (req, res) => {
+    if (!checkPassword(req, env.APP_PASSWORD)) {
+      return res.status(401).json({ error: { message: 'Incorrect or missing password' } });
+    }
+
+    let provider;
+    try {
+      provider = selectProvider(env, { providers });
+    } catch (err) {
+      return sendProviderError(res, err);
+    }
+
+    const body = req.body || {};
+    const worksheet = body.worksheet || body;
+    if (!worksheet || !Array.isArray(worksheet.sections)) {
+      return res.status(400).json({ error: { message: 'worksheet.sections must be an array' } });
+    }
+    const answersMap = normalizeAnswers(body.answers);
+    const userPrompt = buildFeedbackPrompt(worksheet, answersMap);
+    const timeoutMs = Number(env.AI_TIMEOUT_MS) || 45000;
+
+    try {
+      const first = await provider.chatCompletion({
+        system: 'You are a warm A1 French teacher giving concise, encouraging corrections on a practice worksheet. Reply with strict JSON only.',
+        messages: [{ role: 'user', content: userPrompt }],
+        maxTokens: Number(env.FEEDBACK_MAX_TOKENS) || 3000,
+        timeoutMs
+      });
+
+      let parsed = extractJson(first.text);
+      let check = parsed ? validateFeedback(parsed) : { ok: false, errors: ['response was not valid JSON'] };
+
+      if (!check.ok) {
+        const repaired = await provider.chatCompletion({
+          system: 'You are a warm A1 French teacher giving concise, encouraging corrections on a practice worksheet. Reply with strict JSON only.',
+          messages: [
+            { role: 'user', content: userPrompt },
+            { role: 'assistant', content: first.text || '' },
+            { role: 'user', content: buildFeedbackRepairPrompt(check.errors) }
+          ],
+          maxTokens: Number(env.FEEDBACK_MAX_TOKENS) || 3000,
+          timeoutMs
+        });
+        parsed = extractJson(repaired.text);
+        check = parsed ? validateFeedback(parsed) : { ok: false, errors: ['repair response was not valid JSON'] };
+        if (!check.ok) {
+          console.error('[feedback] invalid feedback after repair:', check.errors);
+          return res.status(502).json({
+            error: { message: 'The model did not return valid feedback after one repair attempt. Please try again.' }
+          });
+        }
+      }
+
+      // Never let the model rewrite the learner's original answer.
+      parsed.answers = parsed.answers.map((a) => {
+        if (Object.prototype.hasOwnProperty.call(answersMap, a.question_id)) {
+          return Object.assign({}, a, { original: answersMap[a.question_id] });
+        }
+        return a;
+      });
+
+      res.json(parsed);
+    } catch (err) {
+      console.error(`[${provider.name}] feedback error:`, err && err.message ? err.message : err);
+      sendProviderError(res, err);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/tts — OpenAI TTS, one call per utterance, returned as segments.
+  // -------------------------------------------------------------------------
+  app.post('/api/tts', async (req, res) => {
+    if (!checkPassword(req, env.APP_PASSWORD)) {
+      return res.status(401).json({ error: { message: 'Incorrect or missing password' } });
+    }
+
+    if (!env.OPENAI_API_KEY) {
+      return res.status(500).json({
+        error: {
+          message:
+            'OPENAI_API_KEY is not set, so listening audio is unavailable. Add OPENAI_API_KEY to your .env and restart the server (see .env.example).'
+        }
+      });
+    }
+
+    const { utterances, speakers } = req.body || {};
+    if (!Array.isArray(utterances) || utterances.length === 0) {
+      return res.status(400).json({ error: { message: 'utterances must be a non-empty array' } });
+    }
+    for (const [i, u] of utterances.entries()) {
+      if (!u || typeof u.text !== 'string' || !u.text.trim()) {
+        return res.status(400).json({ error: { message: `utterances[${i}].text must be a non-empty string` } });
+      }
+    }
+
+    const totalChars = utterances.reduce((sum, u) => sum + String(u.text).length, 0);
+    if (totalChars > MAX_TTS_CHARS) {
+      return res.status(400).json({
+        error: {
+          message: `Listening script is too long (${totalChars} characters; limit ${MAX_TTS_CHARS}). Shorten the worksheet and try again.`
+        }
+      });
+    }
+
+    const model = env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
+    const defaultVoice = env.OPENAI_TTS_VOICE || 'alloy';
+    const voiceFor = (name) => {
+      const match = (Array.isArray(speakers) ? speakers : []).find((s) => s && s.name === name);
+      return (match && match.voice) || defaultVoice;
+    };
+    const timeoutMs = Number(env.TTS_TIMEOUT_MS) || 45000;
+
+    try {
+      const segments = await mapPool(utterances, 3, async (utterance, index) => {
+        const voice = voiceFor(utterance.speaker);
+        const result = await withOneRetry(() =>
+          requestBinary({
+            httpRequest,
+            url: 'https://api.openai.com/v1/audio/speech',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${env.OPENAI_API_KEY}`
+            },
+            body: { model, voice, input: String(utterance.text), response_format: 'mp3' },
+            timeoutMs,
+            label: 'OpenAI TTS'
+          })
+        );
+        return {
+          speaker: utterance.speaker,
+          mime: result.mime || 'audio/mpeg',
+          base64: result.buffer.toString('base64'),
+          pause_after_ms: index === utterances.length - 1 ? 0 : TTS_PAUSE_MS
+        };
+      });
+
+      res.json({ segments });
+    } catch (err) {
+      console.error('[tts] error:', err && err.message ? err.message : err);
+      sendProviderError(res, err);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /health — configuration booleans only, never secret values.
+  // -------------------------------------------------------------------------
+  app.get('/health', (_req, res) => {
+    const requested = String(env.TEXT_PROVIDER || 'ollama')
+      .trim()
+      .toLowerCase();
+    const selected = providers[requested] || null;
+    res.json({
+      ok: true,
+      textProvider: selected ? selected.name : requested,
+      textProviderConfigured: selected ? selected.isConfigured() : false,
+      textModelConfigured: selected ? selected.isModelConfigured() : false,
+      ttsConfigured: Boolean(env.OPENAI_API_KEY),
+      passwordRequired: Boolean(env.APP_PASSWORD)
+    });
+  });
+
+  app.get('/legacy', (_req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+  });
+
+  app.get('/', (_req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  });
+
+  return app;
+}
+
+const app = createApp();
+
+function start() {
+  const server = app.listen(PORT, () => {
+    const env = process.env;
+    const requested = String(env.TEXT_PROVIDER || 'ollama')
+      .trim()
+      .toLowerCase();
+    const selected = makeProviders({ env })[requested];
+    if (!selected) {
+      console.warn(`[warn] Unknown TEXT_PROVIDER "${env.TEXT_PROVIDER}". Use "ollama" (default) or "openai".`);
+    } else if (!selected.isConfigured()) {
+      console.warn(`[warn] TEXT_PROVIDER=${selected.name} is selected but its API key is not set. See .env.example.`);
+    } else if (!selected.isModelConfigured()) {
+      console.warn(`[warn] TEXT_PROVIDER=${selected.name} has no model configured (set the model env var). See .env.example.`);
+    }
+    if (!env.OPENAI_API_KEY) {
+      console.warn('[warn] OPENAI_API_KEY is not set — listening audio (/api/tts) is unavailable until it is configured.');
+    }
+    if (env.APP_PASSWORD) {
+      console.log('[info] Password gate is ENABLED (APP_PASSWORD is set).');
+    } else {
+      console.log('[info] Password gate is DISABLED — set APP_PASSWORD in .env to require one.');
+    }
+    console.log(`Ooh La Langue running at http://localhost:${PORT}`);
+  });
+  return server;
+}
+
+if (require.main === module) {
+  start();
+}
+
+module.exports = {
+  app,
+  start,
+  createApp,
+  makeProviders,
+  selectProvider,
+  defaultHttpRequest,
+  ProviderError,
+  withOneRetry,
+  buildSystemPrompt,
+  buildWorksheetPrompt,
+  buildWorksheetRepairPrompt,
+  buildFeedbackPrompt,
+  buildFeedbackRepairPrompt,
+  trimHistory,
+  sanitizeName,
+  sanitizeFact,
+  sanitizeProfile,
+  checkPassword,
+  safeEqual,
+  validateWorksheet,
+  validateFeedback,
+  normalizeWorksheet,
+  normalizeAnswers,
+  worksheetAudioKey,
+  extractJson,
+  mapPool,
+  CURRICULUM_MODULES,
+  CURRICULUM_SUMMARY,
+  WORKSHEET_SECTION_IDS,
+  QUESTION_TYPES,
+  FEEDBACK_VERDICTS,
+  FEEDBACK_ERROR_TYPES,
+  MAX_TTS_CHARS
+};

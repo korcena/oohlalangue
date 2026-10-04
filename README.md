@@ -1,22 +1,19 @@
 # Ooh La Langue
 
-A tiny web app for practicing French conversation with a warm, playful AI tutor. You chat in French; the tutor replies in English with a per-turn correction block (`✅ GOOD`, `🔧 FIX`, `💬 CORRECTED`) and an A1-level follow-up question drawn from a structured curriculum.
+A small web app for practicing French. It has two paths:
 
-Built around the [Anthropic Messages API](https://docs.claude.com/en/api/messages) (Claude Haiku 4.5), Node.js, and a single static HTML page — no build step, no framework.
+- **Chat** — a warm AI tutor. You write in French; it replies with a per-turn correction block
+  (`✅ GOOD`, `🔧 FIX`, `💬 CORRECTED`) and an A1-level follow-up question drawn from a structured
+  curriculum. Voice input/output uses the browser's built-in speech APIs.
+- **Worksheet (Fiche d'exercices)** — the app generates an A1 worksheet (listening, reading,
+  translation/grammar, writing), you answer it in the browser, it autosaves to `localStorage`,
+  the listening section is voiced with OpenAI TTS and cached in IndexedDB, and you can send it to
+  the teacher for feedback rendered next to each answer.
 
----
-
-## Features
-
-- **A1 curriculum-driven prompts.** Each session picks one module (salutations, passé composé, prépositions, métiers, …) and anchors the teacher's questions around it, so you practice concrete grammar instead of generic "how was your day" chatter.
-- **Structured corrections.** The teacher response is parsed on the client into three sections: what you got right, what to fix, and the fully corrected sentence — rendered as clean cards, not a wall of text.
-- **Voice conversation.** Tap the 🎤 mic button to speak your answer in French. A live status bar shows a pulsing dot and a real-time transcript preview so you always know when the app is listening. Speak naturally — continuous recognition captures your full sentence without cutting off mid-speech. Tap the mic again to send, or wait 2 seconds after you stop talking and it sends automatically. The tutor reads the corrected sentence and follow-up question aloud via `SpeechSynthesis` at 0.85x speed. Type a message instead and the response stays text-only — mode is detected per message, no toggle needed. Voice uses free browser-native APIs (zero additional cost). Mic button is hidden on unsupported browsers (graceful fallback to text-only).
-- **Pronunciation tips.** When you speak your answer, the tutor adds a `🗣️ SAY IT:` line with phonetic hints for the trickiest words — nasal sounds, silent letters, liaisons (e.g. "je PRENDS (prahn) le bus").
-- **Teach-on-English.** Drop an English word into your French ("je want du café") and the tutor translates it into the corrected sentence and explains how to use it, instead of rejecting the turn.
-- **Session limits.** Every 10 answers (voice and text combined) the composer is replaced with a live 3-hour countdown. State is persisted in `localStorage`, so refreshing or closing the tab doesn't reset it. The 10th answer corrects without asking a new question.
-- **Personalization that persists.** The tutor quietly extracts short facts it learns (hobbies, family, job, city, …) via a hidden `<note>…</note>` trailer, the client strips the tag and stores the facts in `localStorage`, and future prompts include them under `KNOWN ABOUT <NAME>` so questions feel personal across sessions.
-- **Optional password gate** for shared deployments.
-- **Mobile-friendly.** The chat handles iOS/Android virtual-keyboard quirks with `visualViewport` tracking and scroll-pinning.
+The server is a **minimal key proxy**: it serves the static frontend and forwards AI requests to
+**Ollama Cloud** (default) or **OpenAI** for text, and **OpenAI TTS** for speech. API keys stay
+server-side and are never sent to the browser. There is no database, no accounts, and no
+background workers.
 
 ---
 
@@ -26,7 +23,7 @@ Built around the [Anthropic Messages API](https://docs.claude.com/en/api/message
 git clone https://github.com/korcena/oohlalangue.git
 cd oohlalangue
 npm install
-cp .env.example .env    # fill in ANTHROPIC_API_KEY
+cp .env.example .env     # fill in a text provider (and OpenAI for audio)
 npm start
 ```
 
@@ -34,125 +31,185 @@ Then open <http://localhost:3000>.
 
 ### Requirements
 
-- **Node.js ≥ 18** (uses built-in `https` only — no native `fetch` dependency).
-- An **Anthropic API key**. Get one at <https://console.anthropic.com/>.
+- **Node.js ≥ 18**.
+- A text provider key: **Ollama Cloud** (`OLLAMA_API_KEY` + `OLLAMA_MODEL`) or **OpenAI**
+  (`OPENAI_API_KEY` + `OPENAI_MODEL`).
+- **`OPENAI_API_KEY`** as well if you want the worksheet's listening audio (`/api/tts`). Without
+  it the worksheet still generates and renders; the listening section shows an honest
+  "audio unavailable" notice and never plays fabricated audio.
 
-### Environment variables
+### Scripts
 
-| Variable            | Required | Description                                                               |
-| ------------------- | -------- | ------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY` | yes      | Your Anthropic API key.                                                   |
-| `PORT`              | no       | HTTP port to listen on (default `3000`).                                  |
-| `APP_PASSWORD`      | no       | If set, visitors must enter this password before they can chat. Leave blank to disable the gate. |
+| Command | Description |
+| --- | --- |
+| `npm start` | Start the server (`node server.js`). |
+| `npm run dev` | Same as start (no build step). |
+| `npm test` | Unit tests (`node --test`). No API keys required; providers are mocked. |
+| `npm run lint` | ESLint (flat config). |
+
+---
+
+## Environment variables
+
+See `.env.example` for the secret-free template.
+
+| Variable | Purpose |
+| --- | --- |
+| `TEXT_PROVIDER` | `ollama` (default) or `openai`. |
+| `OLLAMA_BASE_URL` | Ollama Cloud base URL (default `https://ollama.com/api/chat`). |
+| `OLLAMA_API_KEY` | Ollama Cloud API key. |
+| `OLLAMA_MODEL` | Ollama Cloud model name. **No hardcoded default** — set the model available to your account. |
+| `OPENAI_API_KEY` | OpenAI key (text provider `openai` and/or TTS). |
+| `OPENAI_MODEL` | OpenAI text model name. |
+| `OPENAI_TTS_MODEL` | OpenAI TTS model (e.g. `gpt-4o-mini-tts`). |
+| `OPENAI_TTS_VOICE` | Default TTS voice for narration (e.g. `alloy`). |
+| `PORT` | HTTP port (default `3000`). |
+| `APP_PASSWORD` | Optional; if set, visitors must enter it before chatting. |
+| `CHAT_ANSWERS_PER_WINDOW` | Chat session limit (existing behavior; default `10`). |
+| `CHAT_PAUSE_HOURS` | Chat pause duration (existing behavior; default `3`). |
+
+`GET /health` reports which providers are configured **as booleans only** — it never returns a
+key. The model name is never hardcoded into prompts.
+
+> **Open items (verify against your account, not code blockers):** the exact `OLLAMA_MODEL` name
+> and the OpenAI TTS model/voice names are account-dependent. Set them in `.env`.
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────┐        POST /api/chat          ┌──────────────┐        ┌────────────────┐
-│  index.html  │ ──────────────────────────────▶│  server.js   │ ─────▶ │ Anthropic API  │
-│  (vanilla JS)│    { messages, name, profile,  │   (Express)  │        │  claude-haiku  │
-│              │◀──   skipQuestion, voiceMode }  │              │◀─────  │  4.5           │
-└──────────────┘        { text, raw }           └──────────────┘        └────────────────┘
-       │
-       ├── Browser APIs
-       │     SpeechRecognition (fr-FR)  → voice input
-       │     SpeechSynthesis   (fr-FR)  → voice output
-       │
-       ├── localStorage
-       │     oohlalangue_name
-       │     oohlalangue_password
-       │     oohlalangue_profile         (array of learned facts)
-       │     oohlalangue_answers         (0–10 shared counter)
-       │     oohlalangue_pause_until     (epoch ms)
-       └── in-memory history (the Messages-API transcript)
+Browser (public/, vanilla ESM)
+  ├─ views/landing.js      Chat / Worksheet chooser
+  ├─ views/chat.js         A1 tutor (ported from the original app)
+  ├─ views/worksheet.js    generate / answer / reveal / listen / submit / feedback
+  ├─ lib/api.js            fetch wrapper for /api/*
+  ├─ lib/storage.js        versioned localStorage
+  └─ lib/audio-cache.js    IndexedDB audio cache
+        │  fetch (no secrets)
+        ▼
+server.js (Express)
+  ├─ static serving of public/
+  ├─ POST /api/chat        → provider chat completion (unchanged contract)
+  ├─ POST /api/generate    → structured worksheet JSON (incl. listening script)
+  ├─ POST /api/tts         → OpenAI TTS audio segments
+  ├─ POST /api/feedback    → structured feedback JSON
+  └─ GET  /health          → provider configuration (no secrets)
+        │  server-side key
+        ▼
+Ollama Cloud (default) | OpenAI (text) | OpenAI TTS (speech)
+
+Browser storage
+  ├─ localStorage          worksheet/answers/feedback + chat keys
+  └─ IndexedDB             listening audio, keyed by script+voice+speed
 ```
 
-- **`server.js`** is a thin Express server that:
-  - Serves the static `index.html`.
-  - Gates `/api/chat` behind the optional password.
-  - Builds the per-request system prompt (curriculum module, known facts, session-end instructions, pronunciation tips when `voiceMode` is true) and forwards the trimmed conversation to Anthropic's Messages API.
-- **`index.html`** holds everything else: chat UI, correction parser, localStorage profile, session-limit timer, voice I/O, mobile keyboard handling. No build step; edit and reload.
+No build step. Views are ES modules swapped by a small hash router (`#/`, `#/chat`,
+`#/worksheet`).
 
 ---
 
-## Curriculum
+## Trust model (please read)
 
-Each session randomly picks one module and anchors the teacher's questions around it. There are currently **38 modules** spanning A1 grammar, vocabulary, and everyday situations.
+This is a **personal practice tool, not a secure exam**.
 
-### Core A1
+- The `/api/generate` payload contains each question's `answer` and the listening `script`
+  **by design**, because the browser must be able to reveal them after self-practice. There is
+  **no server-side grading secrecy**; a curious learner can read them in DevTools.
+- Hiding is a **UI concern**: the worksheet view does not render answers or the transcript into
+  the DOM until the learner reveals/submits them. The transcript toggle is not built with the
+  text inline.
+- Feedback is generated by an AI teacher, not an invigilator.
+- If a future release wants genuine answer secrecy, grading must move server-side. That is out
+  of scope for this release.
 
-| Module | Focus |
-|---|---|
-| Les Salutations | Formal vs informal greetings, "comment ça va" |
-| Les Nombres | Numbers 0–100 (age, phone, quantities) |
-| Les Jours et Les Mois | Days of the week (lowercase!) and months |
-| Les Fruits | Fruits with correct gender (le/la/un/une) |
-| La Famille | Family vocabulary + possessives (mon/ma/mes) |
-| Le Verbe ÊTRE | être in present, c'est / c'était |
-| Les Verbes Réfléchis | SE verbs: se lever, s'appeler, se promener |
-| Les Verbes Communs | Irregular verbs: aller, avoir, faire, prendre, vouloir |
-| Les Pays | Countries with en / au / aux |
-| Les Articles | Partitive du / de la / de l'; "de" after negation |
-| Les Possessifs | mon/ma/mes, ton/ta/tes, son/sa/ses |
-| Poser une Question | qui / quoi / quand / où / comment / pourquoi / combien |
+---
 
-### Places & Directions
+## Credential-blocked behavior (honest failure)
 
-| Module | Focus |
-|---|---|
-| La Position | Prepositions: dans, sur, sous, devant, derrière, à côté de, chez |
-| La Direction | à / au / aux / de / vers; contractions à+le=au, de+le=du |
-| Les Lieux | Places in the city: boulangerie, poste, supermarché |
-| Les Voies | Streets & waterways: rue, avenue, boulevard, pont, quai |
-| Les Parties de la Ville | centre-ville, banlieue, quartier, zone piétonne |
-| Les Lieux et les Monuments | Public buildings: mairie, gare, commissariat, banque |
+No external credentials are bundled. With nothing configured:
 
-### Daily Life
+- `GET /health` returns `textProvider: "ollama"`, `textProviderConfigured: false`,
+  `textModelConfigured: false`, `ttsConfigured: false`.
+- `POST /api/chat`, `/api/generate`, and `/api/feedback` return HTTP 500 with an actionable
+  message naming the missing env var.
+- `POST /api/tts` returns HTTP 500 with a message naming `OPENAI_API_KEY`.
 
-| Module | Focus |
-|---|---|
-| La Vie Quotidienne | Café / restaurant vocabulary and drinks |
-| Les Métiers | Jobs — no article after être; chez + person |
-| Les Loisirs | Hobbies with jouer à (sports) vs jouer de (instruments) |
-| Les Adjectifs | Agreement (m/f) and BAGS rule |
-| IL Y A | il y a / il n'y a pas de / il y a + time (ago) |
-| La Fréquence | toujours, souvent, parfois, rarement, ne…jamais; aussi after verb |
-| La Météo | il fait, il pleut, il neige, il y a du vent |
-| Le Temps | Time expressions: depuis, il y a, avant, après, pendant |
-| Les Nombres Ordinaux | Ordinals and floors (premier, deuxième, rez-de-chaussée) |
+The app **never fabricates** generated content or audio. The landing view shows a configuration
+notice when a provider is unset. IndexedDB being unavailable only disables caching; playback
+still works by re-fetching, with a "caching off" note.
 
-### Grammar
+---
 
-| Module | Focus |
-|---|---|
-| Le Passé Composé | avoir for most, être for DR MRS VANDERTRAMP + SE verbs; feminine -e |
-| Le Fonctionnement | Intensity adverbs: très, trop, assez, vraiment, beaucoup, un peu |
-| L'Impératif | TU/VOUS/NOUS (no pronoun, -ER drops -s); sois/aie/va; pour, parce que, mais, sans, ne…que, pendant |
+## Storage keys
 
-### Transport & Getting Around (Apr 2026)
+`localStorage` (existing chat keys are retained unchanged):
 
-| Module | Focus |
-|---|---|
-| Le Transport | Vehicles (scooter, vélo, bus, métro, voiture, avion), se déplacer, monter, tourner à droite/gauche, tout droit |
-| Les Distances et le Covoiturage | Which transport for which distance; trajet, itinéraire, arrêt, quai; économiser, covoiturage |
+| Key | Contents |
+| --- | --- |
+| `oohlalangue_name` | learner display name |
+| `oohlalangue_password` | legacy gate value |
+| `oohlalangue_profile` | learned facts |
+| `oohlalangue_answers` | chat answer counter |
+| `oohlalangue_pause_until` | chat pause timestamp |
+| `oohlalangue_worksheet_current` | current generated worksheet |
+| `oohlalangue_worksheet_answers` | in-progress answers + last-saved timestamp |
+| `oohlalangue_worksheet_feedback` | last teacher feedback |
+| `oohlalangue_schema_version` | schema version for migration/discard |
 
-### Food & Descriptions (Apr 2026)
+Reads are defensive (corrupt JSON falls back to empty); writes report success/failure. A schema
+version bump migrates, or discards worksheet keys only — never chat keys, and it never crashes.
 
-| Module | Focus |
-|---|---|
-| La Nourriture | petit-déjeuner, poireau, poire, citrouille, haricots, maïs, ail, piment, pastèque, pamplemousse |
-| Les Pas et Les Étapes | Distinctions: les pas (walking), une étape (process), une marche (stairs) |
-| La Routine et les Descriptions | se lever, se dépêcher, se marier; retraité(e), bruyant, droitier/gaucher/ambidextre |
+**IndexedDB** (`oohlalangue_audio` → `clips`): the ordered audio segment list for a listening
+script, keyed by a hash of `script + voice + speed`. Entries are deleted when the worksheet is
+cleared, so resuming never re-bills TTS.
 
-### Advanced (Apr 2026)
+---
 
-| Module | Focus |
-|---|---|
-| La Météo Avancée | orage, tonnerre, para- words (parapente, parasol, paratonnerre) |
-| Les Verbes Clés | prendre (full conjugation), devoir, apporter, économiser, voyager |
-| Les Expressions Idiomatiques | peu m'importe, au bord du gouffre, c'est la fin des haricots, tu sens bon |
+## API
+
+| Endpoint | Request | Response |
+| --- | --- | --- |
+| `POST /api/chat` | `{ messages, name, profile, skipQuestion, voiceMode }` | `{ text, raw }` |
+| `POST /api/generate` | `{ topic, level='A1', length, includeListening, name?, profile? }` | worksheet JSON (see below) |
+| `POST /api/tts` | `{ utterances:[{speaker,text}], speakers:[{name,voice}], cache_key }` | `{ segments:[{speaker,mime,base64,pause_after_ms}] }` |
+| `POST /api/feedback` | `{ worksheet, answers }` | `{ answers:[…], summary:{…} }` |
+| `GET /health` | — | provider/config booleans (no secrets) |
+| `GET /api/auth` | — | `{ required }` |
+| `POST /api/auth` | password header/body | `{ ok }` or 401 |
+
+Structured worksheet shape (see `docs/superpowers/specs/` for the full contract):
+
+```json
+{
+  "topic": "string",
+  "level": "A1",
+  "sections": [
+    {
+      "id": "listening | reading | translation_grammar | writing",
+      "title_fr": "string",
+      "explanation_en": "string",
+      "audio": { "script": "…", "speakers": [{ "name": "A", "voice": "alloy" }], "cache_key": "…" },
+      "questions": [
+        { "id": "string", "prompt": "string", "type": "short_text|choice|fill_blank|translation",
+          "options": ["…"], "answer": "string", "explanation": "string" }
+      ]
+    }
+  ]
+}
+```
+
+The `audio` block appears **only** on the `listening` section. Provider output is validated
+server-side; invalid JSON gets one repair retry, then a clear `502` (never partial content).
+
+---
+
+## Chat behavior
+
+The chat is ported with **no behavior change**: the correction markers, structured correction
+cards, A1 curriculum modules, learned-profile facts, browser voice I/O, the 10-answers-per-3-hour
+pause, the header counter, and mobile keyboard handling all behave as before. The original chat
+`localStorage` keys are respected, so existing sessions carry over.
 
 ---
 
@@ -160,40 +217,26 @@ Each session randomly picks one module and anchors the teacher's questions aroun
 
 ### Add or edit curriculum modules
 
-Each module in `server.js` is an object with a `module`, a `focus` line, and a short `hint`. Add entries to the `CURRICULUM_MODULES` array and optionally extend `CURRICULUM_SUMMARY` so the model has context when it drifts between topics.
+Each module in `server.js` is an object with a `module`, a `focus` line, and a short `hint`. Add
+entries to the `CURRICULUM_MODULES` array and optionally extend `CURRICULUM_SUMMARY`.
 
 ### Change the tutor's persona or correction format
 
-The system prompt is built in `buildSystemPrompt()` (`server.js`). The `EACH TURN` block drives how the client parses the reply — if you change the emoji markers (`✅ GOOD:`, `🔧 FIX:`, `💬 CORRECTED:`), update the regex map in `parseTeacherReply()` inside `index.html` to match.
-
-### Adjust session limits
-
-In `index.html`:
-
-```js
-const ANSWERS_PER_WINDOW = 10;         // answers (voice + text) before 3h pause
-const PAUSE_MS = 3 * 60 * 60 * 1000;  // pause duration
-```
-
-### Reset a student's profile or session state
-
-The student can clear everything from DevTools:
-
-```js
-localStorage.clear();
-```
+The system prompt is built in `buildSystemPrompt()` (`server.js`). The marker emoji drive the
+client parser; if you change them, update `parseTeacherReply()` in `public/views/chat.js`. A
+golden test (`test/server.test.js`) pins the prompt output — update
+`test/fixtures/system-prompt.golden.json` deliberately if you change it.
 
 ---
 
 ## Deploying
 
-It's a single Node process serving static files — deploy anywhere Node runs:
+It is a single Node process serving static files plus `/api/*`:
 
-- **Render / Railway / Fly.io:** point the service at `npm start`, set the env vars, and you're done.
+- **Render / Railway / Fly.io:** point the service at `npm start`, set the env vars.
 - **VPS:** `pm2 start server.js --name oohlalangue`, put Nginx in front for TLS.
-- **Shared link:** set `APP_PASSWORD` so visitors must enter it before any requests hit Anthropic on your API key.
-
-Cost is bounded per turn: Haiku 4.5, `max_tokens: 500`, and the conversation history is trimmed to the last ~20 messages before each call.
+- **Shared link:** set `APP_PASSWORD` so visitors must enter it before any requests hit your
+  provider keys.
 
 ---
 
@@ -201,15 +244,25 @@ Cost is bounded per turn: Haiku 4.5, `max_tokens: 500`, and the conversation his
 
 ```
 .
-├── server.js        # Express server + Anthropic proxy
-├── index.html       # Single-page chat UI (HTML + CSS + vanilla JS)
-├── package.json
+├── server.js            # static + /api proxy + /health
+├── public/
+│   ├── index.html       # single-page shell
+│   ├── styles.css       # dark/gold/coral design language
+│   ├── app.js           # hash router + bootstrap
+│   ├── lib/             # api, storage, audio-cache
+│   └── views/           # landing, chat, worksheet
+├── test/                # node:test suites (providers, storage, validation, audio cache)
+├── eslint.config.js
 ├── .env.example
 └── README.md
 ```
+
+The original single-file `index.html` is temporarily still served at `/legacy` until the chat
+port's manual parity checklist passes.
 
 ---
 
 ## License
 
-`UNLICENSED` — this is a personal project. All rights reserved. Feel free to read the code for learning purposes.
+`UNLICENSED` — this is a personal project. All rights reserved. Feel free to read the code for
+learning purposes.
