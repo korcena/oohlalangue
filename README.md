@@ -249,16 +249,17 @@ It is a single Node process serving static files plus `/api/*`:
 │   ├── index.html       # single-page shell
 │   ├── styles.css       # dark/gold/coral design language
 │   ├── app.js           # hash router + bootstrap
-│   ├── lib/             # api, storage, audio-cache
-│   └── views/           # landing, chat, worksheet
-├── test/                # node:test suites (providers, storage, validation, audio cache)
+│   ├── lib/             # api, storage, audio-cache, worksheet-render (pure helpers)
+│   └── views/           # landing, chat (ported), worksheet
+├── test/                # node:test suites (providers, storage, validation, audio cache,
+│                        #   worksheet-render pure helpers)
 ├── eslint.config.js
 ├── .env.example
 └── README.md
 ```
 
-The original single-file `index.html` is temporarily still served at `/legacy` until the chat
-port's manual parity checklist passes.
+The original single-file `index.html` is preserved and served at `/legacy` (with its own inline
+styles/script) so the ported chat can be compared side by side during manual parity QA.
 
 ---
 

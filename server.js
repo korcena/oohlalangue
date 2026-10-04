@@ -696,7 +696,8 @@ The object MUST match this shape exactly:
 HARD RULES:
 - Use only these section ids: listening, reading, translation_grammar, writing.
 - The "audio" block MUST appear ONLY on the "listening" section. Never put it on other sections.
-- Every listening section MUST have a non-empty "script" written entirely in simple A1 French and at least one speaker in "speakers". If the script is a dialogue between different people, list each distinct speaker with a distinct "voice" value so they can be voiced separately. Questions must be answerable using the audio alone.
+- Every listening section MUST have a non-empty "script" written entirely in simple A1 French and at least one speaker in "speakers". Questions must be answerable using the audio alone.
+- DIALOGUE FORMAT (important for voicing): if the script has more than one speaker, write it as one line per turn, each line beginning with the speaker's name followed by a colon, e.g. "Marie: Bonjour !\\nPaul: Salut Marie !". Use exactly the speaker "name" values from "speakers", and give each a distinct "voice" value ("male" or "female") so the turns are voiced separately. For a single-speaker narration, write plain sentences and list one speaker.
 - Every question MUST have: id, prompt, type, answer, explanation. "options" is REQUIRED when type is "choice" and must be omitted otherwise.
 - "answer" is the model answer / answer key. It is delivered to the client by design but hidden in the UI until reveal.
 - Keep vocabulary and grammar at A1 level. Use short sentences.

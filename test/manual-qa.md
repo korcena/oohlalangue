@@ -26,37 +26,51 @@ with mocked dependencies; see `npm test`.
 
 ## C. Worksheet journey (requires a text provider key)
 
-- [ ] `#/worksheet` → choose topic/length/listening → Generate renders sections with French titles
-      and English explanations.
-- [ ] Before reveal, inspect the DOM: no answer text and no listening transcript text nodes.
-- [ ] Type answers; the save-state shows **saving → saved** (text label, not colour alone).
+- [ ] Landing → Worksheet card and the deep link `#/worksheet` both open the generation form.
+- [ ] Choose topic/length/listening → Generate shows a loading state, then renders sections with
+      French titles and English explanations.
+- [ ] With no text provider configured, Generate shows the server's actionable error and renders
+      no worksheet (never fabricated content).
+- [ ] Before reveal, inspect the DOM (not just the visual): no answer text and no listening
+      transcript text nodes are present anywhere.
+- [ ] Type answers; the save-state shows **Enregistrement… → Enregistré** (text label, not colour
+      alone).
 - [ ] Refresh: the same worksheet, answers and saved indicator are restored without re-calling
-      `/api/generate`.
-- [ ] Simulate a quota error (fill localStorage) → answers stay in memory and **failed** is shown.
+      `/api/generate`; the deep link still points at `#/worksheet`.
+- [ ] Simulate a quota error (fill localStorage) → answers stay in memory and **Échec …** is shown;
+      text is never silently dropped.
+- [ ] Leave the view (`#/chat` then back) with a pending debounce → answers were flushed, not lost.
 
 ## D. Listening (requires OPENAI_API_KEY)
 
-- [ ] First play calls `/api/tts`; segments play in order with pauses between speakers.
+- [ ] First play calls `/api/tts`; segments play in order with pauses between distinct speakers.
 - [ ] Replay and refresh-play do **not** re-call `/api/tts` (check the network tab; cache hit).
-- [ ] Slow playback works.
-- [ ] The transcript toggle is absent/disabled until reveal.
+- [ ] Slow playback works and toggles the button label to **activé**.
+- [ ] The transcript is absent from the DOM until reveal; after reveal it appears under the
+      listening section.
 - [ ] With `OPENAI_API_KEY` unset, questions still render with an actionable "audio unavailable"
       notice and no fabricated audio.
 - [ ] With IndexedDB disabled, audio still plays (re-fetch) and a "caching off" note is shown.
 
 ## E. Reveal + feedback
 
-- [ ] "Show answers" reveals the answer key and transcript adjacent to each question; the reveal
-      state survives refresh.
+- [ ] "Vérifier / Voir les réponses" reveals the answer key (and transcript) adjacent to each
+      question; the reveal state survives refresh.
 - [ ] "Envoyer au professeur" disables while in flight and renders feedback next to each answer:
-      original + labelled correction + explanation + error type.
-- [ ] The summary card shows strengths, recurring mistakes, priorities and follow-up.
+      original + explicit **Correct / Mistake / Alternative** label + correction + explanation +
+      error type (meaning never depends on colour alone).
+- [ ] The summary card shows strengths (Points forts), recurring mistakes (Erreurs récurrentes),
+      priorities (Priorités) and follow-up (Exercice de suivi).
 - [ ] Refresh keeps feedback.
 
 ## F. Cleanup + security
 
-- [ ] "New worksheet" (with confirmation) clears the worksheet keys and deletes the cached audio;
-      a subsequent play re-bills TTS exactly once.
-- [ ] A malicious provider string such as `<img src=x onerror=alert(1)>` renders as literal text in
-      the worksheet (never executed), because the worksheet renderer uses `textContent`.
+- [ ] "Nouvelle fiche" asks for confirmation, clears the worksheet keys and deletes the cached
+      audio; a subsequent play re-bills TTS exactly once.
+- [ ] A malicious provider string such as `<img src=x onerror=alert(1)>` in a prompt, option, answer,
+      explanation, transcript or feedback renders as literal text (never executed), because the
+      worksheet renderer uses `textContent` only.
+- [ ] The chat's escaped markdown renderer is the only `innerHTML` use under `public/`; worksheet
+      output never uses it.
 - [ ] `/health` returns booleans only and no key values in the response body.
+- [ ] `/legacy` still serves the original single-file chat (200).

@@ -22,7 +22,9 @@ const browserGlobals = {
   performance: 'readonly',
   CustomEvent: 'readonly',
   Event: 'readonly',
-  HTMLElement: 'readonly'
+  HTMLElement: 'readonly',
+  Audio: 'readonly',
+  confirm: 'readonly'
 };
 
 const nodeGlobals = {
@@ -50,7 +52,10 @@ const nodeGlobals = {
 // and must not be "cleaned up". Keep them out of lint churn.
 const portedRegexRules = {
   'no-control-regex': 'off',
-  'no-useless-escape': 'off'
+  'no-useless-escape': 'off',
+  // The chat TTS cleaner uses the original app's emoji-range character class
+  // verbatim; the ZWJ/modifier sequences are intentional.
+  'no-misleading-character-class': 'off'
 };
 
 module.exports = [

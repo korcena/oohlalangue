@@ -263,7 +263,9 @@
         }
       }
 
-      form {
+      /* Scoped to the chat composer (#form): the worksheet also uses <form>
+         and <textarea>, and must not inherit the composer layout. */
+      #form {
         display: flex;
         gap: 10px;
         padding: 12px 4px 4px;
@@ -271,7 +273,7 @@
         align-items: flex-end;
       }
 
-      textarea {
+      #form textarea {
         flex: 1;
         background: var(--panel);
         border: 1px solid var(--border);
@@ -290,7 +292,7 @@
         transition: border-color 0.15s ease;
       }
 
-      textarea:focus {
+      #form textarea:focus {
         border-color: rgba(245, 200, 66, 0.45);
       }
 
@@ -416,7 +418,7 @@
         font-style: italic;
       }
 
-      form.hidden {
+      #form.hidden {
         display: none;
       }
 
@@ -600,8 +602,14 @@
         max-width: 360px;
       }
 
-      form.hidden {
+      #form.hidden {
         display: none;
+      }
+
+      /* .chat-view is built by public/views/chat.js and has no static markup
+         here; its counter is centered like the original header. */
+      .chat-view .session-counter {
+        text-align: center;
       }
 
       /* Tiny pill shown near the header so the student always knows how
@@ -659,11 +667,30 @@
       #view {
         flex: 1;
         min-height: 0;
+        display: flex;
+        flex-direction: column;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
       }
       #view:focus {
         outline: none;
+      }
+
+      /* Chat view fills #view; #chat owns its internal scroll (the shell
+         header already provides the logo/tagline, so the view does not repeat
+         it). */
+      .chat-view {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* Worksheet/landing are natural-height and scroll within #view; the chat
+         view above manages its own internal scroll. */
+      .worksheet,
+      .landing {
+        flex: 0 0 auto;
       }
 
       .landing {
