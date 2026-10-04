@@ -11,6 +11,15 @@ with mocked dependencies; see `npm test`.
 - [ ] With no text provider configured, a configuration notice is shown and is honest
       (no fake content).
 
+## A2. Password gate (only when `APP_PASSWORD` is set)
+
+- [ ] Visiting `#/worksheet` directly (without going through chat) shows the name/password gate
+      and does NOT mount the worksheet until a correct password is entered.
+- [ ] After entering a correct password once, both `#/chat` and `#/worksheet` open without
+      re-prompting (the stored password is verified).
+- [ ] An incorrect stored password re-shows the gate rather than opening the worksheet.
+- [ ] When `APP_PASSWORD` is unset, a name alone is enough and both views open.
+
 ## B. Chat parity (against the original app)
 
 - [ ] `#/chat` greets the learner in French.

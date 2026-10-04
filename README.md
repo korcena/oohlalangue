@@ -63,10 +63,13 @@ See `.env.example` for the secret-free template.
 | `OPENAI_MODEL` | OpenAI text model name. |
 | `OPENAI_TTS_MODEL` | OpenAI TTS model (e.g. `gpt-4o-mini-tts`). |
 | `OPENAI_TTS_VOICE` | Default TTS voice for narration (e.g. `alloy`). |
+| `OPENAI_TTS_VOICE_MALE` | Voice used when a worksheet speaker is labelled `male` (default `onyx`). |
+| `OPENAI_TTS_VOICE_FEMALE` | Voice used when a worksheet speaker is labelled `female` (default `nova`). |
 | `PORT` | HTTP port (default `3000`). |
-| `APP_PASSWORD` | Optional; if set, visitors must enter it before chatting. |
-| `CHAT_ANSWERS_PER_WINDOW` | Chat session limit (existing behavior; default `10`). |
-| `CHAT_PAUSE_HOURS` | Chat pause duration (existing behavior; default `3`). |
+| `APP_PASSWORD` | Optional; if set, visitors must enter it before using Chat or the Worksheet. |
+
+The chat session limit (10 answers, then a 3-hour pause) is a hardcoded client behavior preserved
+from the original app; it is intentionally not configurable.
 
 `GET /health` reports which providers are configured **as booleans only** — it never returns a
 key. The model name is never hardcoded into prompts.

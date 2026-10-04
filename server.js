@@ -992,9 +992,15 @@ async function mapPool(items, limit, fn) {
 }
 
 function sendProviderError(res, err, fallbackStatus = 500) {
-  const status = err && err.status ? err.status : fallbackStatus;
+  const upstream = err && err.status ? err.status : fallbackStatus;
   const message = err && err.message ? err.message : String(err);
-  res.status(status).json({ error: { message } });
+  // Upstream 4xx (bad API key, unknown model, provider-side validation) is a
+  // server/provider configuration problem, NOT the client's request auth. Map
+  // it to 502 so the chat client does not misread a provider 401 as an expired
+  // app password and re-show the gate. Client body errors are returned directly
+  // by the routes and never reach here.
+  const status = upstream >= 400 && upstream < 500 ? 502 : upstream;
+  res.status(status).json({ error: { code: 'PROVIDER_ERROR', message } });
 }
 
 // ---------------------------------------------------------------------------
@@ -1235,9 +1241,21 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
 
     const model = env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
     const defaultVoice = env.OPENAI_TTS_VOICE || 'alloy';
+    const maleVoice = env.OPENAI_TTS_VOICE_MALE || 'onyx';
+    const femaleVoice = env.OPENAI_TTS_VOICE_FEMALE || 'nova';
+    // OpenAI TTS accepts a fixed set of voice names. The worksheet prompt asks
+    // for "male"/"female"; map those (and be lenient for legacy raw values) to
+    // legal voices so a dialogue never sends an invalid voice to the API.
+    const OPENAI_TTS_VOICES = new Set([
+      'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', 'coral', 'sage', 'ash', 'ballad', 'verse'
+    ]);
     const voiceFor = (name) => {
       const match = (Array.isArray(speakers) ? speakers : []).find((s) => s && s.name === name);
-      return (match && match.voice) || defaultVoice;
+      const raw = String((match && match.voice) || '').trim().toLowerCase();
+      if (raw === 'male' || raw === 'homme' || raw === 'h') return maleVoice;
+      if (raw === 'female' || raw === 'femme' || raw === 'f') return femaleVoice;
+      if (OPENAI_TTS_VOICES.has(raw)) return raw;
+      return defaultVoice;
     };
     const timeoutMs = Number(env.TTS_TIMEOUT_MS) || 45000;
 

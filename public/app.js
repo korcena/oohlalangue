@@ -7,12 +7,20 @@
 import { api, authHeaders } from './lib/api.js';
 import { storage } from './lib/storage.js';
 import { createAudioCache } from './lib/audio-cache.js';
+import { ensureAuthenticated } from './lib/gate.js';
 import { mount as mountLanding } from './views/landing.js';
 
+// Views behind the optional APP_PASSWORD gate. Chat wires the gate itself for
+// historical parity; the worksheet uses the shared guard so every learning
+// view is protected consistently.
 const routes = {
   '/': { title: 'Accueil', load: async () => ({ mount: mountLanding }) },
   '/chat': { title: 'Chat', load: () => import('./views/chat.js') },
-  '/worksheet': { title: 'Fiche', load: () => import('./views/worksheet.js') }
+  '/worksheet': {
+    title: 'Fiche',
+    gated: true,
+    load: () => import('./views/worksheet.js')
+  }
 };
 
 const audioCache = createAudioCache();
@@ -117,6 +125,13 @@ async function handleRoute() {
 
   // A newer navigation happened while this module was loading.
   if (token !== mountToken) return;
+
+  // Optional APP_PASSWORD gate for gated views (the server is authoritative).
+  if (route.gated) {
+    const allowed = await ensureAuthenticated();
+    if (token !== mountToken) return;
+    if (!allowed) return;
+  }
 
   container.textContent = '';
   try {

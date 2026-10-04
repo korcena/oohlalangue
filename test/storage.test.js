@@ -152,7 +152,9 @@ test('no localStorage backend never throws', async () => {
   assert.equal(s.getCurrentWorksheet(), null);
 });
 
-test('initial render model contains no answers or listening transcript; reveal does', () => {
+test('initial render model contains no answers or listening transcript; reveal does', async () => {
+  // Exercises the REAL render helper, not a local JSON replacer.
+  const { buildRenderModel } = await import('../public/lib/worksheet-render.js');
   const worksheet = {
     topic: 'Au café',
     sections: [
@@ -166,14 +168,12 @@ test('initial render model contains no answers or listening transcript; reveal d
     ]
   };
 
-  const initial = JSON.stringify(worksheet, (key, value) => {
-    if (key === 'answer' || key === 'explanation' || key === 'script') return undefined;
-    return value;
-  });
+  const initial = JSON.stringify(buildRenderModel(worksheet, { reveal: false }));
   assert.ok(!initial.includes('SECRET ANSWER'));
   assert.ok(!initial.includes('SECRET TRANSCRIPT'));
+  assert.ok(initial.includes('Que veut-il ?'));
 
-  const revealed = JSON.stringify(worksheet);
+  const revealed = JSON.stringify(buildRenderModel(worksheet, { reveal: true }));
   assert.ok(revealed.includes('SECRET ANSWER'));
   assert.ok(revealed.includes('SECRET TRANSCRIPT'));
 });

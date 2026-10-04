@@ -221,6 +221,24 @@ test('provider does not retry a 4xx', async () => {
   assert.equal(fetchImpl.calls.length, 1);
 });
 
+test('a provider 4xx is surfaced as 502 PROVIDER_ERROR, not a client 401', async () => {
+  // A provider-side 401 (bad API key) must not reach the client as 401, or the
+  // chat view would mistake it for an expired app password.
+  const fetchImpl = makeFetchMock(() => jsonResponse(401, { error: { message: 'invalid api key' } }));
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'bad', OLLAMA_MODEL: 'm' } });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'Salut' }] })
+    });
+    assert.equal(res.status, 502);
+    const body = await res.json();
+    assert.equal(body.error.code, 'PROVIDER_ERROR');
+    assert.match(body.error.message, /invalid api key/);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // /health — booleans only, never secret values
 // ---------------------------------------------------------------------------
@@ -493,8 +511,72 @@ test('POST /api/tts routes per speaker and returns ordered base64 segments with 
     assert.equal(body.segments[0].base64, Buffer.from('AUDIO').toString('base64'));
     assert.equal(body.segments[0].pause_after_ms, 600);
     assert.equal(body.segments[1].pause_after_ms, 0);
+    // Unknown/raw voice names are mapped to the legal default, never passed through.
     const voicesUsed = fetchImpl.calls.map((c) => c.body.voice);
-    assert.deepEqual(voicesUsed, ['voice-a', 'voice-b']);
+    assert.deepEqual(voicesUsed, ['alloy', 'alloy']);
+  });
+});
+
+test('POST /api/tts maps male/female speaker labels to legal OpenAI voices', async () => {
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, 'AUDIO', 'audio/mpeg'));
+  const app = createApp({
+    httpRequest: fetchImpl,
+    env: {
+      OPENAI_API_KEY: 'sk',
+      OPENAI_TTS_MODEL: 'gpt-4o-mini-tts',
+      OPENAI_TTS_VOICE_MALE: 'onyx',
+      OPENAI_TTS_VOICE_FEMALE: 'nova'
+    }
+  });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/tts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        utterances: [
+          { speaker: 'Marie', text: 'Bonjour !' },
+          { speaker: 'Paul', text: 'Salut Marie !' }
+        ],
+        speakers: [
+          { name: 'Marie', voice: 'female' },
+          { name: 'Paul', voice: 'male' }
+        ],
+        cache_key: 'k'
+      })
+    });
+    assert.equal(res.status, 200);
+    const voicesUsed = fetchImpl.calls.map((c) => c.body.voice);
+    assert.deepEqual(voicesUsed, ['nova', 'onyx']);
+    // Every voice sent to OpenAI is a legal voice name.
+    const LEGAL = new Set(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', 'coral', 'sage', 'ash', 'ballad', 'verse']);
+    for (const v of voicesUsed) assert.ok(LEGAL.has(v), `${v} must be a legal OpenAI voice`);
+  });
+});
+
+test('POST /api/tts maps a legal raw voice through and defaults unknown values', async () => {
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, 'AUDIO', 'audio/mpeg'));
+  const app = createApp({
+    httpRequest: fetchImpl,
+    env: { OPENAI_API_KEY: 'sk', OPENAI_TTS_VOICE: 'sage' }
+  });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/tts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        utterances: [
+          { speaker: 'A', text: 'Un' },
+          { speaker: 'B', text: 'Deux' }
+        ],
+        speakers: [
+          { name: 'A', voice: 'shimmer' },
+          { name: 'B', voice: 'gibberish' }
+        ]
+      })
+    });
+    assert.equal(res.status, 200);
+    const voicesUsed = fetchImpl.calls.map((c) => c.body.voice);
+    assert.deepEqual(voicesUsed, ['shimmer', 'sage']);
   });
 });
 
