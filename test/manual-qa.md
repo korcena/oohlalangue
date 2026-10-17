@@ -36,8 +36,11 @@ with mocked dependencies; see `npm test`.
 ## C. Worksheet journey (requires a text provider key)
 
 - [ ] Landing → Worksheet card and the deep link `#/worksheet` both open the generation form.
-- [ ] Choose topic/length/listening → Generate shows a loading state, then renders sections with
-      French titles and English explanations.
+- [ ] Choose length/listening (the subject is auto-selected) → Generate shows a loading state,
+      then renders sections with French titles and English explanations.
+- [ ] With no manual topic input, the rendered fiche title is drawn from the A1 curriculum and
+      matches the auto-selected subject. Each generation is judged independently; repeated picks
+      across generations are allowed.
 - [ ] With no text provider configured, Generate shows the server's actionable error and renders
       no worksheet (never fabricated content).
 - [ ] Before reveal, inspect the DOM (not just the visual): no answer text and no listening

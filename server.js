@@ -1098,7 +1098,18 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
     }
 
     const { topic, level = 'A1', length = 'medium', includeListening = true, name, profile } = req.body || {};
-    const userPrompt = buildWorksheetPrompt({ topic, level, length, includeListening, name, profile });
+    // Resolve the topic: a non-empty caller-supplied topic is honored as-is;
+    // otherwise the server picks a random A1 curriculum module. If the
+    // curriculum is somehow empty, fall back to `undefined` so
+    // buildWorksheetPrompt's own default applies (never throw).
+    const providedTopic = typeof topic === 'string' ? topic.trim() : '';
+    const autoSelected = !providedTopic;
+    const mod =
+      autoSelected && Array.isArray(CURRICULUM_MODULES) && CURRICULUM_MODULES.length
+        ? pickRandom(CURRICULUM_MODULES)
+        : null;
+    const promptTopic = providedTopic || (mod ? mod.module : undefined);
+    const userPrompt = buildWorksheetPrompt({ topic: promptTopic, level, length, includeListening, name, profile });
     const timeoutMs = Number(env.AI_TIMEOUT_MS) || 45000;
 
     try {
@@ -1135,7 +1146,12 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
         }
       }
 
-      res.json(normalizeWorksheet(parsed));
+      const normalized = normalizeWorksheet(parsed);
+      // On the auto-selected path, the fiche title must reflect the module we
+      // chose (normalizeWorksheet copies the model's own, possibly different,
+      // topic). The explicit path keeps the model-validated topic untouched.
+      if (mod) normalized.topic = mod.module;
+      res.json(normalized);
     } catch (err) {
       console.error(`[${provider.name}] generate error:`, err && err.message ? err.message : err);
       sendProviderError(res, err);

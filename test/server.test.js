@@ -16,7 +16,8 @@ const {
   normalizeAnswers,
   extractJson,
   worksheetAudioKey,
-  trimHistory
+  trimHistory,
+  CURRICULUM_MODULES
 } = require('../server.js');
 
 const golden = JSON.parse(
@@ -394,9 +395,52 @@ test('POST /api/generate accepts a valid worksheet and computes the audio cache 
     });
     assert.equal(res.status, 200);
     const body = await res.json();
+    assert.equal(body.topic, 'Au café', 'explicit topic must survive untouched');
     assert.equal(body.sections[0].id, 'listening');
     assert.match(body.sections[0].audio.cache_key, /^[a-f0-9]{32}$/);
     assert.equal(body.sections.length, 2);
+  });
+});
+
+test('POST /api/generate auto-selects a curriculum topic when none is provided', async () => {
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, { message: { content: JSON.stringify(validWorksheet) } }));
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
+  const moduleNames = CURRICULUM_MODULES.map((m) => m.module);
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ length: 'medium' })
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(typeof body.topic, 'string');
+    assert.ok(body.topic.length > 0, 'auto topic must be non-empty');
+    assert.ok(moduleNames.includes(body.topic), `auto topic "${body.topic}" must be a curriculum module`);
+    // The auto-selected module must reach the model prompt, not just the response.
+    const upstreamPrompt = fetchImpl.calls
+      .map((call) => (call.body && call.body.messages ? call.body.messages.map((m) => m.content).join('\n') : ''))
+      .join('\n');
+    assert.ok(
+      upstreamPrompt.includes(body.topic),
+      `prompt must mention the auto-selected module "${body.topic}"`
+    );
+  });
+});
+
+test('POST /api/generate treats a whitespace-only topic as absent and auto-selects', async () => {
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, { message: { content: JSON.stringify(validWorksheet) } }));
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
+  const moduleNames = CURRICULUM_MODULES.map((m) => m.module);
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topic: '   ', length: 'medium' })
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(moduleNames.includes(body.topic), `whitespace topic must fall back to a curriculum module`);
   });
 });
 

@@ -177,7 +177,7 @@ cleared, so resuming never re-bills TTS.
 | Endpoint | Request | Response |
 | --- | --- | --- |
 | `POST /api/chat` | `{ messages, name, profile, skipQuestion, voiceMode }` | `{ text, raw }` |
-| `POST /api/generate` | `{ topic, level='A1', length, includeListening, name?, profile? }` | worksheet JSON (see below) |
+| `POST /api/generate` | `{ topic? (auto-selected from the A1 curriculum when omitted), level='A1', length, includeListening, name?, profile? }` | worksheet JSON (see below) |
 | `POST /api/tts` | `{ utterances:[{speaker,text}], speakers:[{name,voice}], cache_key }` | `{ segments:[{speaker,mime,base64,pause_after_ms}] }` |
 | `POST /api/feedback` | `{ worksheet, answers }` | `{ answers:[…], summary:{…} }` |
 | `GET /health` | — | provider/config booleans (no secrets) |

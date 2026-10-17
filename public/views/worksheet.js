@@ -125,16 +125,6 @@ export function mount(container, ctx) {
   function buildGenerationForm() {
     const form = el('form', 'gen-grid');
 
-    const topicField = el('div', 'field');
-    const topicLabel = el('label', null, 'Sujet (topic)');
-    topicLabel.setAttribute('for', 'wsTopic');
-    const topicInput = el('input');
-    topicInput.type = 'text';
-    topicInput.id = 'wsTopic';
-    topicInput.placeholder = 'ex. commander au café, la météo, ma famille…';
-    topicInput.maxLength = 120;
-    topicField.append(topicLabel, topicInput);
-
     const lengthField = el('div', 'field');
     const lengthLabel = el('label', null, 'Longueur (length)');
     lengthLabel.setAttribute('for', 'wsLength');
@@ -168,7 +158,7 @@ export function mount(container, ctx) {
     const submit = el('button', 'btn btn-primary', 'Générer la fiche');
     submit.type = 'submit';
 
-    form.append(topicField, lengthField, levelField, listeningLabel, submit);
+    form.append(lengthField, levelField, listeningLabel, submit);
 
     const status = el('div');
     status.hidden = true;
@@ -181,12 +171,6 @@ export function mount(container, ctx) {
 
     async function generate() {
       if (isGenerating) return;
-      const topic = topicInput.value.trim();
-      if (!topic) {
-        showStatus('error', 'Choisis un sujet pour générer une fiche.');
-        topicInput.focus();
-        return;
-      }
       const now = Date.now();
       if (!canGenerate(storage.getQuota(), now)) {
         showStatus('limit', quotaMessage(now));
@@ -197,7 +181,6 @@ export function mount(container, ctx) {
       showStatus('loading', 'Génération de la fiche en cours…');
       try {
         const worksheet = await api.generate({
-          topic,
           level: 'A1',
           length: lengthSelect.value,
           includeListening: listeningInput.checked,
@@ -303,7 +286,7 @@ export function mount(container, ctx) {
     const intro = el(
       'p',
       'section-expl',
-      'Choisis un sujet, une longueur et (au besoin) la compréhension orale. La fiche est générée par le professeur IA.'
+      'Choisis une longueur et (au besoin) la compréhension orale. La fiche est générée par le professeur IA. Le sujet est choisi automatiquement.'
     );
     generation.resetStatus();
     const now = Date.now();
