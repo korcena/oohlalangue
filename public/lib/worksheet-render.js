@@ -50,6 +50,18 @@ export function errorTypeLabel(errorType) {
   return ERROR_TYPE_LABELS[errorType] || '';
 }
 
+// Choose the answer control for a question. Free-writing answers need a
+// multi-line textarea even though the generator emits them as `short_text`.
+export function answerControlKind(sectionId, question) {
+  const q = question && typeof question === 'object' ? question : {};
+  const type = str(q.type);
+  const options = Array.isArray(q.options) ? q.options : [];
+  if (type === 'choice' && options.length) return 'choice';
+  if (str(sectionId) === 'writing') return 'textarea';
+  if (type === 'fill_blank' || type === 'short_text') return 'input';
+  return 'textarea';
+}
+
 // Returns true when the persisted answers payload marks the worksheet as
 // revealed (either directly or under the reserved key).
 export function isRevealedFromAnswers(answersPayload) {
@@ -210,6 +222,7 @@ export default {
   sectionLabel,
   verdictLabel,
   errorTypeLabel,
+  answerControlKind,
   isRevealedFromAnswers,
   buildRenderModel,
   feedbackToUi,

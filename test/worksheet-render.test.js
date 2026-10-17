@@ -114,6 +114,27 @@ test('isRevealedFromAnswers reads the persisted reveal marker safely', async () 
   assert.equal(isRevealedFromAnswers({ revealed: true }), true);
 });
 
+test('answerControlKind picks the right control per section and question type', async () => {
+  const { answerControlKind } = await loadHelpers();
+  assert.equal(
+    answerControlKind('reading', { type: 'choice', options: ['Vrai', 'Faux'] }),
+    'choice'
+  );
+  assert.equal(answerControlKind('writing', { type: 'short_text' }), 'textarea');
+  assert.equal(answerControlKind('reading', { type: 'short_text' }), 'input');
+  assert.equal(answerControlKind('translation_grammar', { type: 'fill_blank' }), 'input');
+  assert.equal(answerControlKind('translation_grammar', { type: 'translation' }), 'textarea');
+});
+
+test('answerControlKind is defensive about missing sections, questions and types', async () => {
+  const { answerControlKind } = await loadHelpers();
+  assert.equal(answerControlKind(undefined, undefined), 'textarea');
+  assert.equal(answerControlKind('writing', null), 'textarea');
+  assert.equal(answerControlKind('reading', {}), 'textarea');
+  assert.equal(answerControlKind('reading', { type: 'mystery' }), 'textarea');
+  assert.equal(answerControlKind(undefined, { type: 'short_text' }), 'input');
+});
+
 test('feedbackToUi preserves worksheet question order and keeps original adjacent to correction', async () => {
   const { feedbackToUi } = await loadHelpers();
   const feedback = {

@@ -15,6 +15,7 @@ import {
   feedbackToUi,
   deriveUtterances,
   isRevealedFromAnswers,
+  answerControlKind,
   REVEAL_KEY
 } from '../lib/worksheet-render.js';
 import {
@@ -382,12 +383,12 @@ export function mount(container, ctx) {
     }
 
     for (const question of section.questions) {
-      card.appendChild(renderQuestion(question, feedbackById));
+      card.appendChild(renderQuestion(question, feedbackById, section.id));
     }
     return card;
   }
 
-  function renderQuestion(question, feedbackById) {
+  function renderQuestion(question, feedbackById, sectionId) {
     const block = el('div', 'question-block');
 
     const idEl = el('div', 'question-id', `Question ${question.id}`);
@@ -396,8 +397,9 @@ export function mount(container, ctx) {
 
     const answerKey = question.id;
     const savedValue = state.answersByQuestionId[answerKey];
+    const controlKind = answerControlKind(sectionId, question);
 
-    if (question.type === 'choice' && question.options.length) {
+    if (controlKind === 'choice') {
       const list = el('div', 'choice-list');
       const groupName = `choice-${answerKey}`;
       for (const optionText of question.options) {
@@ -416,7 +418,7 @@ export function mount(container, ctx) {
         list.appendChild(label);
       }
       block.appendChild(list);
-    } else if (question.type === 'fill_blank' || question.type === 'short_text') {
+    } else if (controlKind === 'input') {
       const input = el('input', 'answer-input');
       input.type = 'text';
       input.value = savedValue == null ? '' : String(savedValue);
@@ -429,7 +431,7 @@ export function mount(container, ctx) {
     } else {
       const textarea = el('textarea', 'answer-input');
       textarea.value = savedValue == null ? '' : String(savedValue);
-      textarea.rows = 2;
+      textarea.rows = sectionId === 'writing' ? 5 : 2;
       textarea.setAttribute('aria-label', `Réponse à la question ${answerKey}`);
       textarea.addEventListener('input', () => {
         state.answersByQuestionId[answerKey] = textarea.value;
