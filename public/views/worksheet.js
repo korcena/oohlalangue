@@ -17,9 +17,34 @@ import {
   isRevealedFromAnswers,
   REVEAL_KEY
 } from '../lib/worksheet-render.js';
+import {
+  canGenerate,
+  nextWeekStart,
+  recordGeneration,
+  WEEKLY_LIMIT
+} from '../lib/quota.js';
+import { recordScore, scoreFromFeedback, worksheetIdentity } from '../lib/scores.js';
 
 const SAVE_DEBOUNCE_MS = 600;
 const SLOW_RATE = 0.75;
+
+// Local-time label for the next weekly reset (next Sunday 00:00), e.g.
+// "dimanche 18 octobre". `toLocaleDateString` already includes the weekday.
+function quotaResetLabel(now) {
+  return new Date(nextWeekStart(now)).toLocaleDateString('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long'
+  });
+}
+
+// French explanation shown wherever a generation affordance is disabled.
+function quotaMessage(now = Date.now()) {
+  return (
+    `Limite de ${WEEKLY_LIMIT} nouvelles fiches par semaine atteinte. ` +
+    `De nouvelles fiches seront disponibles le ${quotaResetLabel(now)} à 00:00.`
+  );
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -50,6 +75,9 @@ export function mount(container, ctx) {
   let saveTimer = null;
   let currentAudio = null;
   let audioToken = 0;
+  // Synchronous guard against Enter/rapid double-submit; `submit.disabled` is
+  // set too late to cover a keypress that lands before the first `await`.
+  let isGenerating = false;
 
   // -- Shell ----------------------------------------------------------------
   const wrap = el('section', 'worksheet');
@@ -152,12 +180,19 @@ export function mount(container, ctx) {
     });
 
     async function generate() {
+      if (isGenerating) return;
       const topic = topicInput.value.trim();
       if (!topic) {
         showStatus('error', 'Choisis un sujet pour générer une fiche.');
         topicInput.focus();
         return;
       }
+      const now = Date.now();
+      if (!canGenerate(storage.getQuota(), now)) {
+        showStatus('limit', quotaMessage(now));
+        return;
+      }
+      isGenerating = true;
       submit.disabled = true;
       showStatus('loading', 'Génération de la fiche en cours…');
       try {
@@ -169,7 +204,16 @@ export function mount(container, ctx) {
           name: storage.getName(),
           profile: storage.getProfile()
         });
-        startWorksheet(worksheet, { deleteOldAudio: true });
+        // `onAccepted` fires only after the payload is validated, and before the
+        // render that recomputes `canStartNew`. Incrementing here (not after the
+        // render) means the "Nouvelle fiche" button and the quota notice already
+        // reflect the post-generation state on the very generation that reaches
+        // the limit — no reload needed. A failed/invalid generation never fires
+        // it, so nothing is counted.
+        startWorksheet(worksheet, {
+          deleteOldAudio: true,
+          onAccepted: () => recordGeneration(storage, now)
+        });
       } catch (err) {
         showStatus(
           'error',
@@ -177,7 +221,8 @@ export function mount(container, ctx) {
             ' — the app does not fake worksheet content; configure a text provider (see README).'
         );
       } finally {
-        submit.disabled = false;
+        isGenerating = false;
+        submit.disabled = !canGenerate(storage.getQuota(), Date.now());
       }
     }
 
@@ -193,14 +238,22 @@ export function mount(container, ctx) {
       status.className = '';
     }
 
-    return { form, showStatus, resetStatus };
+    function setDisabled(value) {
+      submit.disabled = Boolean(value);
+    }
+
+    return { form, showStatus, resetStatus, setDisabled };
   }
 
-  function startWorksheet(worksheet, { deleteOldAudio = false } = {}) {
+  function startWorksheet(worksheet, { deleteOldAudio = false, onAccepted = null } = {}) {
     if (!worksheet || !Array.isArray(worksheet.sections)) {
       renderGeneration('The server returned an unexpected worksheet. Please try again.');
-      return;
+      return false;
     }
+
+    // Run the accepted hook (quota increment) BEFORE any render, so a render
+    // that reads the quota sees the post-generation state.
+    if (typeof onAccepted === 'function') onAccepted();
 
     const oldKeys = collectCacheKeys(state.worksheet);
     if (deleteOldAudio) {
@@ -224,6 +277,7 @@ export function mount(container, ctx) {
       setSaveState('', '');
     }
     renderWorksheet();
+    return true;
   }
 
   function collectCacheKeys(worksheet) {
@@ -240,6 +294,7 @@ export function mount(container, ctx) {
     // Reset the header: no worksheet is loaded, so drop the per-worksheet
     // action buttons and title/meta from any previous worksheet.
     actions.querySelectorAll('.btn-ws-action').forEach((n) => n.remove());
+    actions.querySelectorAll('.worksheet-quota-note').forEach((n) => n.remove());
     title.textContent = 'Fiche d’exercices';
     meta.textContent = '';
     if (errorMessage) {
@@ -251,7 +306,13 @@ export function mount(container, ctx) {
       'Choisis un sujet, une longueur et (au besoin) la compréhension orale. La fiche est générée par le professeur IA.'
     );
     generation.resetStatus();
+    const now = Date.now();
+    const allowed = canGenerate(storage.getQuota(), now);
+    generation.setDisabled(!allowed);
     body.append(intro, generation.form);
+    if (!allowed) {
+      body.appendChild(el('div', 'notice', quotaMessage(now)));
+    }
   }
 
   // -- Worksheet rendering ---------------------------------------------------
@@ -268,6 +329,9 @@ export function mount(container, ctx) {
 
     // Header actions: reveal toggle, send, new worksheet.
     actions.querySelectorAll('.btn-ws-action').forEach((n) => n.remove());
+    actions.querySelectorAll('.worksheet-quota-note').forEach((n) => n.remove());
+    const quotaNow = Date.now();
+    const canStartNew = canGenerate(storage.getQuota(), quotaNow);
 
     const revealBtn = el('button', 'btn btn-ghost btn-ws-action', state.revealed ? 'Cacher les réponses' : 'Vérifier / Voir les réponses');
     revealBtn.type = 'button';
@@ -286,9 +350,15 @@ export function mount(container, ctx) {
 
     const newBtn = el('button', 'btn btn-ghost btn-ws-action', 'Nouvelle fiche');
     newBtn.type = 'button';
+    // An existing worksheet stays fully usable (answer/listen/reveal/feedback)
+    // while exhausted; only creating a NEW one is blocked.
+    newBtn.disabled = !canStartNew;
     newBtn.addEventListener('click', () => newWorksheet());
 
     actions.append(revealBtn, sendBtn, newBtn);
+    if (!canStartNew) {
+      actions.appendChild(el('div', 'notice worksheet-quota-note', quotaMessage(quotaNow)));
+    }
 
     const model = buildRenderModel(state.worksheet, { reveal: state.revealed });
     const feedbackRows = state.feedback ? feedbackToUi(state.feedback, state.worksheet) : [];
@@ -669,6 +739,27 @@ export function mount(container, ctx) {
       if (!ok) {
         setSaveState('failed', 'Feedback reçu mais non enregistré — réessayez de le conserver.');
       }
+      // Record the per-fiche score from the received verdicts. `recordScore` is
+      // fail-open and never throws, so a storage failure here must not be
+      // reported as a feedback failure.
+      const score = scoreFromFeedback(feedback);
+      if (score.total > 0) {
+        const recorded = recordScore(
+          storage,
+          {
+            id: worksheetIdentity(state.worksheet),
+            topic: state.worksheet && state.worksheet.topic,
+            correct: score.correct,
+            total: score.total
+          },
+          Date.now()
+        );
+        if (!recorded.persisted) {
+          // Feedback itself succeeded; only the progress write was lost. Make
+          // the silent loss visible without failing the send.
+          console.warn('Score non enregistré — progression potentiellement perdue.');
+        }
+      }
       renderWorksheet();
     } catch (err) {
       const box = el(
@@ -687,6 +778,9 @@ export function mount(container, ctx) {
   // -- New worksheet ---------------------------------------------------------
   function newWorksheet() {
     if (!state.worksheet) return;
+    // Defensive: the button is disabled once the weekly limit is reached, but
+    // never clear a fiche the learner can no longer replace.
+    if (!canGenerate(storage.getQuota(), Date.now())) return;
     const confirmed =
       typeof window !== 'undefined' && typeof window.confirm === 'function'
         ? window.confirm('Effacer la fiche actuelle, ses réponses, le bilan et l’audio en cache ?')

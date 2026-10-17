@@ -17,6 +17,8 @@ export const KEYS = Object.freeze({
   WORKSHEET_CURRENT: 'oohlalangue_worksheet_current',
   WORKSHEET_ANSWERS: 'oohlalangue_worksheet_answers',
   WORKSHEET_FEEDBACK: 'oohlalangue_worksheet_feedback',
+  QUOTA_GENERATIONS: 'oohlalangue_quota_generations',
+  SCORE_HISTORY: 'oohlalangue_score_history',
   SCHEMA_VERSION: 'oohlalangue_schema_version'
 });
 
@@ -27,6 +29,18 @@ export const CHAT_KEYS = [KEYS.NAME, KEYS.PASSWORD, KEYS.PROFILE, KEYS.ANSWERS, 
 
 // Keys that a version bump is allowed to discard.
 export const WORKSHEET_KEYS = [
+  KEYS.WORKSHEET_CURRENT,
+  KEYS.WORKSHEET_ANSWERS,
+  KEYS.WORKSHEET_FEEDBACK,
+  KEYS.QUOTA_GENERATIONS,
+  KEYS.SCORE_HISTORY
+];
+
+// Session keys wiped when the current worksheet is cleared (generation and
+// "Nouvelle fiche"). The quota counter and the score history are deliberately
+// NOT here: generation must never reset them. They stay in WORKSHEET_KEYS so a
+// schema bump can still discard them.
+export const WORKSHEET_SESSION_KEYS = [
   KEYS.WORKSHEET_CURRENT,
   KEYS.WORKSHEET_ANSWERS,
   KEYS.WORKSHEET_FEEDBACK
@@ -218,9 +232,27 @@ export function createStorage(backend = defaultBackend(), { onIssue = null, auto
     return writeJSON(KEYS.WORKSHEET_FEEDBACK, feedback);
   }
 
+  // Weekly generation quota ({ weekStart, count }). Reads never throw; a
+  // missing/corrupt value yields null so callers fail open (allow generation).
+  function getQuota() {
+    return readJSON(KEYS.QUOTA_GENERATIONS, null);
+  }
+  function setQuota(quota) {
+    return writeJSON(KEYS.QUOTA_GENERATIONS, quota);
+  }
+
+  // Per-fiche score history ({ version, entries }). Reads never throw; a
+  // missing/corrupt value yields null so callers fail open (empty history).
+  function getScoreHistory() {
+    return readJSON(KEYS.SCORE_HISTORY, null);
+  }
+  function setScoreHistory(history) {
+    return writeJSON(KEYS.SCORE_HISTORY, history);
+  }
+
   function clearCurrentWorksheet() {
     let ok = true;
-    for (const key of WORKSHEET_KEYS) ok = removeRaw(key) && ok;
+    for (const key of WORKSHEET_SESSION_KEYS) ok = removeRaw(key) && ok;
     return ok;
   }
 
@@ -249,6 +281,10 @@ export function createStorage(backend = defaultBackend(), { onIssue = null, auto
     setWorksheetAnswers,
     getFeedback,
     setFeedback,
+    getQuota,
+    setQuota,
+    getScoreHistory,
+    setScoreHistory,
     clearCurrentWorksheet
   };
 }

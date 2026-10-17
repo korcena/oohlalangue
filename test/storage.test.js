@@ -74,6 +74,49 @@ test('worksheet keys save and resume including the last-saved timestamp', async 
   assert.deepEqual(r.getFeedback(), { answers: [] });
 });
 
+test('quota key round-trips through the storage wrapper', async () => {
+  const { createStorage, KEYS } = await loadStorage();
+  const backend = fakeBackend();
+  const s = createStorage(backend, { autoMigrate: false });
+  const quota = { weekStart: 1728777600000, count: 2 };
+
+  assert.equal(s.setQuota(quota), true);
+  assert.deepEqual(s.getQuota(), quota);
+  assert.equal(backend.getItem(KEYS.QUOTA_GENERATIONS), JSON.stringify(quota));
+
+  assert.equal(s.setQuota({ weekStart: 1728777600000, count: 3 }), true);
+  assert.equal(s.getQuota().count, 3);
+});
+
+test('quota key is registered for migration but excluded from session clearing', async () => {
+  const { KEYS, WORKSHEET_KEYS, WORKSHEET_SESSION_KEYS } = await loadStorage();
+  assert.ok(WORKSHEET_KEYS.includes(KEYS.QUOTA_GENERATIONS));
+  assert.ok(!WORKSHEET_SESSION_KEYS.includes(KEYS.QUOTA_GENERATIONS));
+});
+
+test('score history key round-trips through the storage wrapper', async () => {
+  const { createStorage, KEYS } = await loadStorage();
+  const backend = fakeBackend();
+  const s = createStorage(backend, { autoMigrate: false });
+  const history = {
+    version: 1,
+    entries: [{ id: 'abc', weekStart: 1728777600000, at: 1728840000000, topic: 'Au café', correct: 2, total: 3, score: 67 }]
+  };
+
+  assert.equal(s.setScoreHistory(history), true);
+  assert.deepEqual(s.getScoreHistory(), history);
+  assert.equal(backend.getItem(KEYS.SCORE_HISTORY), JSON.stringify(history));
+
+  assert.equal(s.setScoreHistory({ version: 1, entries: [] }), true);
+  assert.deepEqual(s.getScoreHistory(), { version: 1, entries: [] });
+});
+
+test('score history key is registered for migration but excluded from session clearing', async () => {
+  const { KEYS, WORKSHEET_KEYS, WORKSHEET_SESSION_KEYS } = await loadStorage();
+  assert.ok(WORKSHEET_KEYS.includes(KEYS.SCORE_HISTORY));
+  assert.ok(!WORKSHEET_SESSION_KEYS.includes(KEYS.SCORE_HISTORY));
+});
+
 test('corrupt JSON falls back safely and does not throw', async () => {
   const { createStorage, KEYS } = await loadStorage();
   const backend = fakeBackend({
@@ -116,7 +159,9 @@ test('newer/unknown schema version discards worksheet keys only and keeps chat k
     [KEYS.PROFILE]: JSON.stringify(['likes tea']),
     [KEYS.WORKSHEET_CURRENT]: JSON.stringify({ topic: 'old' }),
     [KEYS.WORKSHEET_ANSWERS]: JSON.stringify({ answersByQuestionId: {} }),
-    [KEYS.WORKSHEET_FEEDBACK]: JSON.stringify({ answers: [] })
+    [KEYS.WORKSHEET_FEEDBACK]: JSON.stringify({ answers: [] }),
+    [KEYS.QUOTA_GENERATIONS]: JSON.stringify({ weekStart: 1, count: 2 }),
+    [KEYS.SCORE_HISTORY]: JSON.stringify({ version: 1, entries: [{ id: 'abc' }] })
   });
   const s = createStorage(backend, { autoMigrate: false });
   const result = s.migrate();
@@ -126,20 +171,27 @@ test('newer/unknown schema version discards worksheet keys only and keeps chat k
   assert.equal(backend.getItem(KEYS.WORKSHEET_CURRENT), null);
   assert.equal(backend.getItem(KEYS.WORKSHEET_ANSWERS), null);
   assert.equal(backend.getItem(KEYS.WORKSHEET_FEEDBACK), null);
+  assert.equal(backend.getItem(KEYS.QUOTA_GENERATIONS), null);
+  assert.equal(backend.getItem(KEYS.SCORE_HISTORY), null);
   assert.equal(backend.getItem(KEYS.SCHEMA_VERSION), String(CURRENT_SCHEMA_VERSION));
 });
 
-test('clearCurrentWorksheet removes all worksheet keys and nothing else', async () => {
+test('clearCurrentWorksheet removes session keys but preserves the quota, score history and chat keys', async () => {
   const { createStorage, KEYS } = await loadStorage();
   const backend = fakeBackend({ [KEYS.NAME]: 'Kate' });
   const s = createStorage(backend, { autoMigrate: false });
   s.setCurrentWorksheet({ topic: 'x' });
   s.setWorksheetAnswers({ q: 'a' });
   s.setFeedback({ answers: [] });
+  s.setQuota({ weekStart: 1728777600000, count: 2 });
+  const history = { version: 1, entries: [{ id: 'abc', weekStart: 1728777600000, at: 1728840000000, topic: 'x', correct: 1, total: 2, score: 50 }] };
+  s.setScoreHistory(history);
   assert.equal(s.clearCurrentWorksheet(), true);
   assert.equal(backend.getItem(KEYS.WORKSHEET_CURRENT), null);
   assert.equal(backend.getItem(KEYS.WORKSHEET_ANSWERS), null);
   assert.equal(backend.getItem(KEYS.WORKSHEET_FEEDBACK), null);
+  assert.deepEqual(s.getQuota(), { weekStart: 1728777600000, count: 2 });
+  assert.deepEqual(s.getScoreHistory(), history);
   assert.equal(backend.getItem(KEYS.NAME), 'Kate');
 });
 

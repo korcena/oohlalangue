@@ -83,3 +83,41 @@ with mocked dependencies; see `npm test`.
       output never uses it.
 - [ ] `/health` returns booleans only and no key values in the response body.
 - [ ] `/legacy` still serves the original single-file chat (200).
+
+## G. Weekly quota (3 new fiches/week, requires a text provider key)
+
+- [ ] In a fresh browser profile (empty `localStorage`), the generation form is enabled and the
+      quota record is absent; the app allows generation.
+- [ ] Generate 3 successful fiches. After the 3rd, the "Générer la fiche" and "Nouvelle fiche"
+      buttons are disabled.
+- [ ] Attempting a 4th generation does not call `/api/generate` (check the network tab) and shows
+      the French message naming the next Sunday at 00:00.
+- [ ] Reload the page: the count is preserved (still exhausted) and the message/disabled state
+      remain. Clearing the worksheet via an existing fiche does not reset the count.
+- [ ] With the quota exhausted, an existing saved fiche can still be opened, answered, listened to,
+      revealed and sent to the teacher (only new-generation affordances are disabled).
+- [ ] Simulate a failed generation (e.g. no text provider configured): an error is shown and the
+      stored count is unchanged (failures/timeouts never consume quota).
+- [ ] Inspect the message: it names the next Sunday's date in French and says 00:00.
+
+## H. Progrès / suivi des scores (requires a text provider key)
+
+- [ ] Before any feedback, the landing page `#/` shows a friendly French "Pas encore de score"
+      message (`.cache-note`) inside the "Progrès" card; the layout is intact.
+- [ ] Send a fiche to the teacher from `#/worksheet`, then navigate to `#/`: the "Progrès" card
+      lists this week's fiche (topic or "Fiche" + score %) and the weekly average.
+- [ ] Send a second (different) fiche: both appear under "Cette semaine", and the average updates
+      to the mean of the two scores.
+- [ ] Re-send the same fiche (reopen it, send again): no duplicate appears — the existing entry is
+      updated in place and the average does not double-count.
+- [ ] A fiche with zero graded answers records nothing (no new list item, unchanged average).
+- [ ] "12 dernières semaines" shows one line per week, most recent first, with the week's average
+      and fiche count.
+- [ ] Reload the page: the "Progrès" card is unchanged (persisted in `localStorage`); it is **not**
+      wiped by generating a new fiche or by "Nouvelle fiche".
+- [ ] Simulate a week rollover (or set the system clock past Sunday 00:00): an entry recorded
+      before the boundary stays grouped in its original week; a fiche recorded at/after Sunday
+      00:00 lands in the new week.
+- [ ] Clear the score-history key manually: the landing page falls back to the empty state and the
+      layout is intact (no error).
+

@@ -1,5 +1,80 @@
 // Landing view: choose Chat or Worksheet.
 
+import { historyByWeek, readHistory, thisWeek } from '../lib/scores.js';
+
+function ficheCount(count) {
+  return `${count} fiche${count > 1 ? 's' : ''}`;
+}
+
+function weekLabel(weekStart) {
+  return new Date(weekStart).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+}
+
+// Build the "Progrès" panel from the score history. Never uses innerHTML:
+// every learner/model-derived string (topic) is inserted as text. `now` is
+// captured once at mount and reused for both week groupings so they cannot
+// straddle a Sunday boundary.
+function buildProgressPanel(history, now) {
+  const panel = document.createElement('section');
+  panel.className = 'summary-card';
+  panel.style.maxWidth = '640px';
+  panel.style.width = '100%';
+  panel.style.textAlign = 'left';
+
+  const title = document.createElement('h3');
+  title.textContent = 'Progrès';
+  panel.appendChild(title);
+
+  if (!history.entries.length) {
+    const empty = document.createElement('p');
+    empty.className = 'cache-note';
+    empty.textContent =
+      'Pas encore de score — envoie une fiche au professeur pour voir ta progression ici.';
+    panel.appendChild(empty);
+    return panel;
+  }
+
+  const current = thisWeek(history, now);
+  const thisHeading = document.createElement('h4');
+  thisHeading.textContent = 'Cette semaine';
+  panel.appendChild(thisHeading);
+
+  if (current.count > 0) {
+    const line = document.createElement('p');
+    line.textContent = `Moyenne : ${current.average} % (${ficheCount(current.count)})`;
+    panel.appendChild(line);
+
+    const list = document.createElement('ul');
+    for (const entry of current.entries) {
+      const item = document.createElement('li');
+      item.textContent = `${entry.topic || 'Fiche'} — ${entry.score} %`;
+      list.appendChild(item);
+    }
+    panel.appendChild(list);
+  } else {
+    const line = document.createElement('p');
+    line.className = 'cache-note';
+    line.textContent = 'Pas encore de fiche corrigée cette semaine.';
+    panel.appendChild(line);
+  }
+
+  const historyHeading = document.createElement('h4');
+  historyHeading.textContent = '12 dernières semaines';
+  panel.appendChild(historyHeading);
+
+  const weekList = document.createElement('ul');
+  for (const bucket of historyByWeek(history, now)) {
+    const item = document.createElement('li');
+    item.textContent = `Semaine du ${weekLabel(bucket.weekStart)} — ${bucket.average} % (${ficheCount(
+      bucket.count
+    )})`;
+    weekList.appendChild(item);
+  }
+  panel.appendChild(weekList);
+
+  return panel;
+}
+
 export function mount(container, ctx) {
   const landing = document.createElement('section');
   landing.className = 'landing';
@@ -66,6 +141,13 @@ export function mount(container, ctx) {
   }
 
   landing.appendChild(cards);
+
+  // Score history is read once at mount; the router remounts this view on each
+  // navigation, so returning to `#/` after sending a fiche shows the update.
+  // `now` is captured once and shared by both week groupings below.
+  const now = Date.now();
+  landing.appendChild(buildProgressPanel(readHistory(ctx.storage, now), now));
+
   container.appendChild(landing);
 
   // Honest configuration notice from /health. Never fabricates content.
