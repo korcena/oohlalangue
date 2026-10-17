@@ -715,7 +715,7 @@ export function mount(container, ctx) {
       state.feedback = feedback;
       const ok = storage.setFeedback(feedback);
       if (!ok) {
-        setSaveState('failed', 'Feedback reçu mais non enregistré — réessayez de le conserver.');
+        setSaveState('failed', 'Corrections reçues mais non enregistrées — réessayez de les conserver.');
       }
       // Record the per-fiche score from the received verdicts. `recordScore` is
       // fail-open and never throws, so a storage failure here must not be

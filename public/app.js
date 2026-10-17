@@ -119,7 +119,7 @@ async function handleRoute() {
     container.textContent = '';
     const notice = document.createElement('div');
     notice.className = 'notice error';
-    notice.textContent = 'Could not load this view: ' + (err && err.message ? err.message : err);
+    notice.textContent = 'Impossible de charger cette vue : ' + (err && err.message ? err.message : err);
     container.appendChild(notice);
     return;
   }
@@ -146,7 +146,7 @@ async function handleRoute() {
     container.textContent = '';
     const notice = document.createElement('div');
     notice.className = 'notice error';
-    notice.textContent = 'Could not start this view: ' + (err && err.message ? err.message : err);
+    notice.textContent = 'Impossible de démarrer cette vue : ' + (err && err.message ? err.message : err);
     container.appendChild(notice);
   }
 }

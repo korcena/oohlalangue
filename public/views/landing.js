@@ -86,7 +86,7 @@ export function mount(container, ctx) {
   const lead = document.createElement('p');
   lead.className = 'lead';
   lead.textContent =
-    'Practice French with a warm AI tutor, or work through an A1 worksheet with listening, reading, grammar and writing.';
+    'Entraîne-toi à parler français avec un tuteur IA bienveillant, ou fais une fiche A1 avec compréhension orale, compréhension écrite, grammaire et expression écrite.';
   landing.appendChild(lead);
 
   const notice = document.createElement('div');
@@ -101,14 +101,14 @@ export function mount(container, ctx) {
     {
       icon: '💬',
       title: 'Chat',
-      desc: 'Talk in French and get instant corrections plus a follow-up question.',
+      desc: 'Parle en français et reçois des corrections immédiates, plus une question de suivi.',
       cta: 'Commencer à parler →',
       route: '/chat'
     },
     {
       icon: '📝',
       title: 'Fiche d’exercices',
-      desc: 'Generate an A1 worksheet, answer it, listen to the audio, and send it to the teacher.',
+      desc: 'Génère une fiche A1, réponds aux questions, écoute l’audio et envoie-la au professeur.',
       cta: 'Créer une fiche →',
       route: '/worksheet'
     }
@@ -158,19 +158,22 @@ export function mount(container, ctx) {
       if (cancelled || !health) return;
       const missing = [];
       if (!health.textProviderConfigured) {
-        missing.push(`the text provider ("${health.textProvider}") has no API key`);
+        missing.push(`le fournisseur de texte (« ${health.textProvider} ») n’a pas de clé API`);
       } else if (!health.textModelConfigured) {
-        missing.push(`the text provider ("${health.textProvider}") has no model configured`);
+        missing.push(`le fournisseur de texte (« ${health.textProvider} ») n’a pas de modèle configuré`);
       }
-      if (!health.ttsConfigured) missing.push('OpenAI TTS is not configured (listening audio unavailable)');
+      if (!health.ttsConfigured) {
+        missing.push('La synthèse vocale OpenAI n’est pas configurée (audio de compréhension orale indisponible)');
+      }
       if (missing.length) {
         notice.hidden = false;
         const strong = document.createElement('strong');
-        strong.textContent = 'Heads up: ';
+        strong.textContent = 'Attention : ';
         notice.append(
           strong,
           document.createTextNode(
-            missing.join('; ') + '. The app will not fabricate content until this is fixed (see README / .env.example).'
+            missing.join('; ') +
+              '. L’application ne fabriquera pas de contenu tant que ce n’est pas corrigé (voir README / .env.example).'
           )
         );
       }

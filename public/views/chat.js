@@ -40,9 +40,9 @@ export function mount(container, ctx) {
   const voiceStatus = el('div', 'voice-status');
   voiceStatus.id = 'voiceStatus';
   const voiceDot = el('span', 'dot');
-  const voicePreview = el('span', 'transcript-preview', 'Listening…');
+  const voicePreview = el('span', 'transcript-preview', 'J’écoute…');
   voicePreview.id = 'voicePreview';
-  const voiceHint = el('span', 'voice-hint', 'tap 🎤 to send');
+  const voiceHint = el('span', 'voice-hint', 'appuie sur 🎤 pour envoyer');
   voiceStatus.append(voiceDot, voicePreview, voiceHint);
 
   const form = el('form');
@@ -51,14 +51,14 @@ export function mount(container, ctx) {
 
   const input = el('textarea');
   input.id = 'input';
-  input.placeholder = 'Écris ta réponse ici… (Enter to send · Shift+Enter for new line)';
+  input.placeholder = 'Écris ta réponse ici… (Entrée pour envoyer · Maj+Entrée pour revenir à la ligne)';
   input.rows = 1;
   input.autocomplete = 'off';
 
   const micBtn = el('button', 'mic', '🎤');
   micBtn.type = 'button';
   micBtn.id = 'micBtn';
-  micBtn.title = 'Speak your answer';
+  micBtn.title = 'Réponds à voix haute';
 
   const sendBtn = el('button', 'send', 'Envoyer');
   sendBtn.type = 'submit';
@@ -76,7 +76,7 @@ export function mount(container, ctx) {
   const pauseSub = el(
     'p',
     'pause-sub',
-    'Session limit reached. Review the corrections above — your input returns when the timer ends.'
+    'Limite de session atteinte. Relis les corrections ci-dessus — tu pourras écrire de nouveau quand le minuteur sera terminé.'
   );
   pauseEl.append(pauseTitle, pauseTimerEl, pauseSub);
 
@@ -138,7 +138,9 @@ export function mount(container, ctx) {
       const strong = el('strong', null, String(remaining));
       sessionCounterEl.append(
         strong,
-        document.createTextNode(` answer${remaining === 1 ? '' : 's'} left in this session`)
+        document.createTextNode(
+          ` réponse${remaining === 1 ? '' : 's'} restante${remaining === 1 ? '' : 's'} dans cette session`
+        )
       );
     }
   }
@@ -249,7 +251,7 @@ export function mount(container, ctx) {
   }
 
   function updatePreview(text) {
-    voicePreview.textContent = text || 'Listening…';
+    voicePreview.textContent = text || 'J’écoute…';
   }
 
   function stopAndSend() {
@@ -299,7 +301,7 @@ export function mount(container, ctx) {
         } else {
           interimText = result[0].transcript;
         }
-        updatePreview(finalTranscript + interimText || 'Listening…');
+        updatePreview(finalTranscript + interimText || 'J’écoute…');
         resetSilenceTimer();
       });
 
@@ -333,7 +335,7 @@ export function mount(container, ctx) {
         finalTranscript = '';
         interimText = '';
         if (e.error !== 'aborted') {
-          showError('Voice error: ' + e.error);
+          showError('Erreur vocale : ' + e.error);
         }
       });
     }
@@ -342,7 +344,7 @@ export function mount(container, ctx) {
     wantListening = true;
     isListening = true;
     micBtn.classList.add('listening');
-    updatePreview('Listening…');
+    updatePreview('J’écoute…');
     showVoiceStatus(true);
     recognition.start();
     resetSilenceTimer();
@@ -398,8 +400,8 @@ export function mount(container, ctx) {
     gatePasswordField.style.display = required ? '' : 'none';
     gatePassword.required = required;
     gateIntro.textContent = required
-      ? 'Enter your name and the password to start practicing.'
-      : 'What should we call you?';
+      ? 'Entre ton nom et le mot de passe pour commencer.'
+      : 'Comment veux-tu qu’on t’appelle ?';
   }
 
   function showGate(errorText) {
@@ -432,7 +434,7 @@ export function mount(container, ctx) {
           ok = false;
         }
         if (!ok) {
-          showGate('Incorrect password');
+          showGate('Mot de passe incorrect');
           return;
         }
         storage.setPassword(pw);
@@ -441,7 +443,7 @@ export function mount(container, ctx) {
       hideGate();
       send('Start!', { display: false });
     } catch (err) {
-      showGate('Network error: ' + (err && err.message ? err.message : err));
+      showGate('Erreur réseau : ' + (err && err.message ? err.message : err));
     } finally {
       gateSubmit.disabled = false;
     }
@@ -623,10 +625,10 @@ export function mount(container, ctx) {
     if (parsed.corrections.length) {
       const card = el('div', 'correction');
       const labelMap = {
-        good: { cls: 'good', icon: '✅', label: 'Good' },
-        fix: { cls: 'fix', icon: '🔧', label: 'Fix' },
-        corrected: { cls: 'corrected', icon: '💬', label: 'Corrected' },
-        sayit: { cls: 'sayit', icon: '🗣️', label: 'Say it' }
+        good: { cls: 'good', icon: '✅', label: 'Bien' },
+        fix: { cls: 'fix', icon: '🔧', label: 'À corriger' },
+        corrected: { cls: 'corrected', icon: '💬', label: 'Corrigé' },
+        sayit: { cls: 'sayit', icon: '🗣️', label: 'Dis-le' }
       };
       for (const c of parsed.corrections) {
         const meta = labelMap[c.type];
@@ -691,19 +693,19 @@ export function mount(container, ctx) {
       if (err && err.status === 401) {
         storage.setPassword('');
         history.pop();
-        showGate('Session expired — please re-enter the password');
+        showGate('Session expirée — ressaisis le mot de passe');
         return;
       }
 
       // The api wrapper already normalises provider/network errors into a
       // human-readable `message`, so surface it as-is.
       if (err && err.name === 'ApiError') {
-        showError(err.message || 'Request failed');
+        showError(err.message || 'Échec de la requête');
         history.pop();
         return;
       }
 
-      showError('Network error: ' + (err && err.message ? err.message : err));
+      showError('Erreur réseau : ' + (err && err.message ? err.message : err));
       history.pop();
     } finally {
       busy = false;

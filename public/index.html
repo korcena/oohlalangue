@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="utf-8" />
     <!-- interactive-widget=resizes-content tells Chrome Android (108+) and
@@ -10,7 +10,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1, interactive-widget=resizes-content"
     />
-    <title>Ooh La Langue — French practice</title>
+    <title>Ooh La Langue — Entraînement au français</title>
     <link
       rel="icon"
       type="image/svg+xml"
@@ -30,29 +30,29 @@
     <div class="gate hidden" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
       <form class="gate-card" id="gateForm" autocomplete="off">
         <h2 id="gateTitle">Ooh La <span class="accent">Langue</span></h2>
-        <p>Enter your name and the password to start practicing.</p>
+        <p>Entre ton nom et le mot de passe pour commencer.</p>
         <div class="field">
-          <label for="gateName">Your name</label>
+          <label for="gateName">Ton nom</label>
           <input
             type="text"
             id="gateName"
-            placeholder="e.g. Kate"
+            placeholder="ex. Kate"
             autocomplete="given-name"
             maxlength="40"
             required
           />
         </div>
         <div class="field">
-          <label for="gatePassword">Password</label>
+          <label for="gatePassword">Mot de passe</label>
           <input
             type="password"
             id="gatePassword"
-            placeholder="Password"
+            placeholder="Mot de passe"
             autocomplete="current-password"
             required
           />
         </div>
-        <button type="submit" id="gateSubmit">Enter</button>
+        <button type="submit" id="gateSubmit">Entrer</button>
         <div class="gate-error" id="gateError" aria-live="polite"></div>
       </form>
     </div>
@@ -61,10 +61,10 @@
       <header>
         <h1 class="logo">Ooh La <span class="accent">Langue</span></h1>
         <div class="tagline">
-          <span>French conversation practice</span>
+          <span>Conversation en français</span>
           <span class="badge">A1 · Débutant</span>
         </div>
-        <nav class="main-nav" aria-label="Primary">
+        <nav class="main-nav" aria-label="Navigation principale">
           <a class="nav-link" href="#/" data-route="/">Accueil</a>
           <a class="nav-link" href="#/chat" data-route="/chat">Chat</a>
           <a class="nav-link" href="#/worksheet" data-route="/worksheet">Fiche</a>

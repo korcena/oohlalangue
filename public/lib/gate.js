@@ -77,8 +77,8 @@ export async function ensureAuthenticated(signal) {
   else els.gatePasswordField.style.display = 'none';
   els.gatePassword.required = required;
   els.gateIntro.textContent = required
-    ? 'Enter your name and the password to start practicing.'
-    : 'What should we call you?';
+    ? 'Entre ton nom et le mot de passe pour commencer.'
+    : 'Comment veux-tu qu’on t’appelle ?';
   els.gateEl.classList.remove('hidden');
   els.gateError.textContent = '';
   els.gatePassword.value = '';
@@ -119,7 +119,7 @@ export async function ensureAuthenticated(signal) {
             ok = false;
           }
           if (!ok) {
-            els.gateError.textContent = 'Incorrect password';
+            els.gateError.textContent = 'Mot de passe incorrect';
             return;
           }
           storage.setPassword(pw);
@@ -129,7 +129,7 @@ export async function ensureAuthenticated(signal) {
         els.gateError.textContent = '';
         finish(true);
       } catch (err) {
-        els.gateError.textContent = 'Network error: ' + (err && err.message ? err.message : err);
+        els.gateError.textContent = 'Erreur réseau : ' + (err && err.message ? err.message : err);
       } finally {
         els.gateSubmit.disabled = false;
       }
