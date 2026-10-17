@@ -126,14 +126,14 @@ export function mount(container, ctx) {
     const form = el('form', 'gen-grid');
 
     const lengthField = el('div', 'field');
-    const lengthLabel = el('label', null, 'Longueur (length)');
+    const lengthLabel = el('label', null, 'Longueur');
     lengthLabel.setAttribute('for', 'wsLength');
     const lengthSelect = el('select');
     lengthSelect.id = 'wsLength';
     for (const [value, label] of [
-      ['short', 'Courte (short)'],
-      ['medium', 'Moyenne (medium)'],
-      ['long', 'Longue (long)']
+      ['short', 'Courte'],
+      ['medium', 'Moyenne'],
+      ['long', 'Longue']
     ]) {
       const option = el('option', null, label);
       option.value = value;
@@ -147,7 +147,7 @@ export function mount(container, ctx) {
     listeningInput.type = 'checkbox';
     listeningInput.id = 'wsListening';
     listeningInput.checked = true;
-    listeningLabel.append(listeningInput, document.createTextNode('Inclure la compréhension orale (listening)'));
+    listeningLabel.append(listeningInput, document.createTextNode('Inclure la compréhension orale'));
 
     const levelField = el('div', 'field');
     const levelLabel = el('label', null, 'Niveau');
@@ -201,7 +201,7 @@ export function mount(container, ctx) {
         showStatus(
           'error',
           (err && err.message ? err.message : String(err)) +
-            ' — the app does not fake worksheet content; configure a text provider (see README).'
+            ' — l’application ne fabrique pas de contenu ; configure un fournisseur de texte (voir le README).'
         );
       } finally {
         isGenerating = false;
@@ -230,7 +230,7 @@ export function mount(container, ctx) {
 
   function startWorksheet(worksheet, { deleteOldAudio = false, onAccepted = null } = {}) {
     if (!worksheet || !Array.isArray(worksheet.sections)) {
-      renderGeneration('The server returned an unexpected worksheet. Please try again.');
+      renderGeneration('Le serveur a renvoyé une fiche inattendue. Réessaie.');
       return false;
     }
 
@@ -362,7 +362,16 @@ export function mount(container, ctx) {
   function renderSection(section, feedbackById) {
     const card = el('section', 'section-card');
     card.appendChild(el('h3', null, section.title));
-    if (section.explanation) card.appendChild(el('p', 'section-expl', section.explanation));
+    if (section.instructions) card.appendChild(el('p', 'section-expl', section.instructions));
+
+    // The reading passage is an input (not a secret): always visible, above
+    // that section's questions, and written with textContent only.
+    if (section.id === 'reading' && section.passage) {
+      const box = el('div', 'reading-passage');
+      box.appendChild(el('span', 'label', 'Texte à lire'));
+      box.appendChild(document.createTextNode(section.passage));
+      card.appendChild(box);
+    }
 
     if (section.id === 'listening' && section.audio) {
       // The render model strips `script` until reveal (security), but the TTS
@@ -387,20 +396,6 @@ export function mount(container, ctx) {
 
     const answerKey = question.id;
     const savedValue = state.answersByQuestionId[answerKey];
-
-    if (question.hint) {
-      const hintWrap = el('div');
-      const hintBtn = el('button', 'btn btn-ghost', 'Indice');
-      hintBtn.type = 'button';
-      const hintText = el('div', 'cache-note', question.hint);
-      hintText.hidden = true;
-      hintBtn.addEventListener('click', () => {
-        hintText.hidden = !hintText.hidden;
-        hintBtn.textContent = hintText.hidden ? 'Indice' : 'Cacher l’indice';
-      });
-      hintWrap.append(hintBtn, hintText);
-      block.appendChild(hintWrap);
-    }
 
     if (question.type === 'choice' && question.options.length) {
       const list = el('div', 'choice-list');
@@ -473,7 +468,7 @@ export function mount(container, ctx) {
   function renderFeedback(row) {
     const card = el('div', 'feedback ' + (row.verdict || ''));
     const headRow = el('div', 'fb-head');
-    headRow.appendChild(el('span', 'fb-label', 'Original'));
+    headRow.appendChild(el('span', 'fb-label', 'Ta réponse'));
     headRow.appendChild(el('span', null, row.original));
     card.appendChild(headRow);
 
@@ -558,7 +553,7 @@ export function mount(container, ctx) {
       setNotice(
         'error',
         (err && err.message ? err.message : String(err)) +
-          ' — audio unavailable; the app does not play fabricated audio.'
+          ' — audio indisponible ; l’application ne joue pas d’audio fabriqué.'
       );
     }
 
@@ -635,7 +630,7 @@ export function mount(container, ctx) {
 
     const utterances = deriveUtterances(rawAudio || {});
     if (!utterances.length) {
-      throw new Error('The listening script is empty.');
+      throw new Error('Le script audio est vide.');
     }
     statusEl.textContent = 'Synthèse audio en cours…';
     const response = await api.tts({
@@ -644,7 +639,7 @@ export function mount(container, ctx) {
       cache_key: cacheKey
     });
     if (!response || !Array.isArray(response.segments) || !response.segments.length) {
-      throw new Error('The audio service returned no segments.');
+      throw new Error('Le service audio n’a renvoyé aucun segment.');
     }
     state.segments = response.segments;
     if (cacheKey) {
@@ -680,7 +675,7 @@ export function mount(container, ctx) {
       currentAudio = audio;
       audio.playbackRate = state.slow ? SLOW_RATE : 1;
       audio.onended = () => resolve(true);
-      audio.onerror = () => reject(new Error('Audio playback failed'));
+      audio.onerror = () => reject(new Error('La lecture audio a échoué.'));
       audio.play().catch(reject);
     });
   }

@@ -6,24 +6,26 @@
 // TRUST MODEL (design spec §1/§9): the generated answers and the listening
 // transcript are present in the `/api/generate` payload by design. Hiding is a
 // UI concern. `buildRenderModel(worksheet, { reveal: false })` deliberately
-// drops `answer`, the answer `explanation`, and the listening `script` so the
-// view cannot accidentally render them before the learner reveals them.
+// drops each question's `answer`, its `explanation`, and the listening `script`
+// so the view cannot accidentally render them before the learner reveals them.
+// Section instructions and the reading passage are inputs, not secrets, so they
+// are always mapped (the passage is NOT reveal-gated).
 
 export const SECTION_LABELS = Object.freeze({
   listening: 'Compréhension orale',
   reading: 'Compréhension écrite',
-  translation_grammar: 'Grammaire et traduction',
+  translation_grammar: 'Grammaire',
   writing: 'Expression écrite'
 });
 
 export const VERDICT_LABELS = Object.freeze({
   correct: 'Correct',
-  mistake: 'Mistake',
+  mistake: 'Erreur',
   alternative: 'Alternative'
 });
 
 export const ERROR_TYPE_LABELS = Object.freeze({
-  error: 'Error',
+  error: 'Erreur',
   style: 'Style',
   alternative: 'Alternative'
 });
@@ -70,15 +72,15 @@ export function buildRenderModel(worksheet, { reveal = false } = {}) {
       const model = {
         id: str(sec.id),
         title: str(sec.title_fr) || sectionLabel(sec.id),
-        explanation: str(sec.explanation_en),
+        instructions: str(sec.instructions_fr) || str(sec.explanation_en),
+        passage: str(sec.text_fr),
         questions: (Array.isArray(sec.questions) ? sec.questions : []).map((question) => {
           const q = question && typeof question === 'object' ? question : {};
           const model_q = {
             id: str(q.id),
             prompt: str(q.prompt),
             type: str(q.type) || 'short_text',
-            options: Array.isArray(q.options) ? q.options.map(str) : [],
-            hint: str(q.hint)
+            options: Array.isArray(q.options) ? q.options.map(str) : []
           };
           if (reveal) {
             model_q.answer = str(q.answer);

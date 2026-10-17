@@ -675,8 +675,9 @@ The object MUST match this shape exactly:
   "sections": [
     {
       "id": "listening | reading | translation_grammar | writing",
-      "title_fr": "French section title",
-      "explanation_en": "One short English sentence explaining the task",
+      "title_fr": "Titre de la section, en français",
+      "instructions_fr": "Consigne de la section, une phrase courte en français uniquement",
+      "text_fr": "Le texte français à lire — uniquement pour la section reading",
       "audio": {
         "script": "The full spoken French script",
         "speakers": [{ "name": "A", "voice": "female" }],
@@ -685,12 +686,11 @@ The object MUST match this shape exactly:
       "questions": [
         {
           "id": "unique-string-id",
-          "prompt": "The question in French (with a short English hint if helpful)",
+          "prompt": "La question, en français uniquement — aucune traduction ni glose en anglais",
           "type": "short_text | choice | fill_blank | translation",
           "options": ["only for choice questions"],
-          "hint": "optional short English nudge to help the learner without giving the answer",
           "answer": "the expected answer (hidden until the learner reveals it)",
-          "explanation": "short English explanation of the answer"
+          "explanation": "Explication de la réponse, en français uniquement"
         }
       ]
     }
@@ -700,12 +700,15 @@ The object MUST match this shape exactly:
 HARD RULES:
 - Use only these section ids: listening, reading, translation_grammar, writing.
 - The "audio" block MUST appear ONLY on the "listening" section. Never put it on other sections.
+- The "text_fr" field MUST appear ONLY on the "reading" section, and it MUST be a non-empty French A1 reading passage that the section's questions are based on. Never put "text_fr" on other sections.
 - Every listening section MUST have a non-empty "script" written entirely in simple A1 French and at least one speaker in "speakers". Questions must be answerable using the audio alone.
 - DIALOGUE FORMAT (important for voicing): if the script has more than one speaker, write it as one line per turn, each line beginning with the speaker's name followed by a colon, e.g. "Marie: Bonjour !\\nPaul: Salut Marie !". Use exactly the speaker "name" values from "speakers", and give each a distinct "voice" value ("male" or "female") so the turns are voiced separately. For a single-speaker narration, write plain sentences and list one speaker.
 - Every question MUST have: id, prompt, type, answer, explanation. "options" is REQUIRED when type is "choice" and must be omitted otherwise.
+- translation_grammar ("Grammaire"): French-only grammar practice. Use fill-in-the-blank (fill_blank), conjugation, singular/plural or masculine/feminine transforms, and reformulation of a FRENCH sentence (short_text). NEVER ask the learner to translate from English; never emit a "translation" question whose source sentence is English.
 - "answer" is the model answer / answer key. It is delivered to the client by design but hidden in the UI until reveal.
 - Keep vocabulary and grammar at A1 level. Use short sentences.
-- Titles in French, explanations in English.
+- EVERY learner-facing string MUST be written in French only: "title_fr", "instructions_fr", "text_fr", "prompt", "options", "answer" and "explanation". Never write English — not even in parentheses, not as a translation or gloss.
+- Questions and options MUST NOT contain an English translation, gloss or hint (for example, never write "(What's your name?)").
 - Do not add any keys other than those shown.`;
 
 function lengthToCounts(length) {
@@ -730,10 +733,11 @@ function buildWorksheetPrompt({ topic, level = 'A1', length = 'medium', includeL
   if (includeListening) {
     lines.push(`- listening (Compréhension orale): an original French mini-dialogue or narration (${counts.listening} comprehension questions).`);
   }
-  lines.push(`- reading (Compréhension écrite): a short A1 French text with ${counts.reading} questions.`);
-  lines.push(`- translation_grammar (Grammaire et traduction): ${counts.translation_grammar} translation or fill-in-the-blank items.`);
+  lines.push(`- reading (Compréhension écrite): a short A1 French text in "text_fr" with ${counts.reading} questions that can be answered using that text alone.`);
+  lines.push(`- translation_grammar (Grammaire): ${counts.translation_grammar} French-only grammar exercises (fill in the blank, conjugation, singular/plural and masculine/feminine transforms, French sentence reformulation). Never English→French translation.`);
   lines.push(`- writing (Expression écrite): ${counts.writing} short writing task(s).`);
   lines.push('');
+  lines.push('All learner-facing text (instructions_fr, text_fr, prompts, options, answers, explanations) must be written in French only, with no English translations or glosses.');
   lines.push('Respond with ONLY the JSON object described in the system instructions.');
   return lines.join('\n');
 }
@@ -773,8 +777,8 @@ function validateWorksheet(value) {
       seenSectionIds.add(section.id);
     }
     if (typeof section.title_fr !== 'string' || !section.title_fr.trim()) errors.push(`${where}.title_fr must be a non-empty string`);
-    if (typeof section.explanation_en !== 'string' || !section.explanation_en.trim()) {
-      errors.push(`${where}.explanation_en must be a non-empty string`);
+    if (typeof section.instructions_fr !== 'string' || !section.instructions_fr.trim()) {
+      errors.push(`${where}.instructions_fr must be a non-empty string`);
     }
 
     const isListening = section.id === 'listening';
@@ -799,6 +803,15 @@ function validateWorksheet(value) {
       }
     } else if (section.audio != null) {
       errors.push(`${where}.audio must only appear on the listening section`);
+    }
+
+    const isReading = section.id === 'reading';
+    if (isReading) {
+      if (typeof section.text_fr !== 'string' || !section.text_fr.trim()) {
+        errors.push(`${where}.text_fr must be a non-empty string for the reading section`);
+      }
+    } else if (section.text_fr != null) {
+      errors.push(`${where}.text_fr must only appear on the reading section`);
     }
 
     if (!Array.isArray(section.questions) || section.questions.length === 0) {
@@ -850,7 +863,15 @@ function normalizeWorksheet(value) {
   out.level = typeof out.level === 'string' && out.level ? out.level : 'A1';
   out.sections = (Array.isArray(out.sections) ? out.sections : []).map((section) => {
     const sec = Object.assign({}, section);
-    sec.questions = (Array.isArray(sec.questions) ? sec.questions : []).map((q) => Object.assign({}, q));
+    // Defensive strip so a legacy/English field can never persist in a newly
+    // generated fiche. Validated `instructions_fr`/`text_fr` pass through.
+    delete sec.hint;
+    delete sec.explanation_en;
+    sec.questions = (Array.isArray(sec.questions) ? sec.questions : []).map((q) => {
+      const next = Object.assign({}, q);
+      delete next.hint;
+      return next;
+    });
     if (sec.id === 'listening' && sec.audio && typeof sec.audio === 'object') {
       sec.audio = Object.assign({}, sec.audio);
       sec.audio.cache_key = worksheetAudioKey(sec.audio.script, sec.audio.speakers);
@@ -864,6 +885,9 @@ function normalizeWorksheet(value) {
 // Structured output: feedback contract (see design spec §9)
 // ---------------------------------------------------------------------------
 
+const FEEDBACK_SYSTEM_PROMPT =
+  'You are a warm A1 French teacher giving concise, encouraging corrections on a practice worksheet. Write every correction, explanation and summary in French only. Reply with strict JSON only.';
+
 function buildFeedbackPrompt(worksheet, answersMap) {
   const sections = (worksheet && worksheet.sections) || [];
   const lines = [];
@@ -874,6 +898,9 @@ function buildFeedbackPrompt(worksheet, answersMap) {
     lines.push(`## Section ${section.id} — ${section.title_fr || ''}`);
     if (section.id === 'listening' && section.audio && section.audio.script) {
       lines.push(`Listening script (use it to judge the listening answers): ${section.audio.script}`);
+    }
+    if (section.id === 'reading' && section.text_fr) {
+      lines.push(`Reading text (use it to judge the reading answers): ${section.text_fr}`);
     }
     for (const q of section.questions || []) {
       const original = Object.prototype.hasOwnProperty.call(answersMap, q.id) ? answersMap[q.id] : '';
@@ -891,7 +918,7 @@ function buildFeedbackPrompt(worksheet, answersMap) {
   lines.push('  ],');
   lines.push('  "summary": { "strengths": ["..."], "recurring_mistakes": ["..."], "priorities": ["..."], "follow_up": "string" }');
   lines.push('}');
-  lines.push('Rules: verdict must be one of correct|mistake|alternative. error_type must be one of error|style|alternative. Copy each learner answer into "original" exactly as given. Be encouraging, concise and use simple English.');
+  lines.push('Rules: verdict must be one of correct|mistake|alternative. error_type must be one of error|style|alternative. Copy each learner answer into "original" exactly as given. Write every correction, explanation and summary item in French only — never English. Be encouraging and concise.');
   return lines.join('\n');
 }
 
@@ -899,7 +926,7 @@ function buildFeedbackRepairPrompt(errors) {
   return `Your previous feedback response was rejected because:
 - ${(errors || ['unknown error']).join('\n- ')}
 
-Return the corrected feedback as a SINGLE valid JSON object only. Use only the exact verdict and error_type values allowed. No commentary.`;
+Return the corrected feedback as a SINGLE valid JSON object only. Use only the exact verdict and error_type values allowed. No commentary. Écris toutes les corrections, explications et le bilan en français.`;
 }
 
 function validateFeedback(value) {
@@ -1143,7 +1170,7 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
           console.error('[generate] invalid worksheet after repair:', check.errors);
           return res.status(502).json({
             error: {
-              message: 'The model did not return a valid worksheet after one repair attempt. Please try again.'
+              message: 'Le modèle n’a pas renvoyé de fiche valide après une tentative de correction. Réessaie.'
             }
           });
         }
@@ -1187,7 +1214,7 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
 
     try {
       const first = await provider.chatCompletion({
-        system: 'You are a warm A1 French teacher giving concise, encouraging corrections on a practice worksheet. Reply with strict JSON only.',
+        system: FEEDBACK_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userPrompt }],
         maxTokens: Number(env.FEEDBACK_MAX_TOKENS) || 3000,
         timeoutMs
@@ -1198,7 +1225,7 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
 
       if (!check.ok) {
         const repaired = await provider.chatCompletion({
-          system: 'You are a warm A1 French teacher giving concise, encouraging corrections on a practice worksheet. Reply with strict JSON only.',
+          system: FEEDBACK_SYSTEM_PROMPT,
           messages: [
             { role: 'user', content: userPrompt },
             { role: 'assistant', content: first.text || '' },
@@ -1212,7 +1239,7 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
         if (!check.ok) {
           console.error('[feedback] invalid feedback after repair:', check.errors);
           return res.status(502).json({
-            error: { message: 'The model did not return valid feedback after one repair attempt. Please try again.' }
+            error: { message: 'Le modèle n’a pas renvoyé de correction valide après une tentative de correction. Réessaie.' }
           });
         }
       }

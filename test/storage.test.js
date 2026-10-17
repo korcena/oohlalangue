@@ -213,7 +213,7 @@ test('initial render model contains no answers or listening transcript; reveal d
       {
         id: 'listening',
         title_fr: 'Compréhension orale',
-        explanation_en: 'Listen.',
+        instructions_fr: 'Écoute.',
         audio: { script: 'SECRET TRANSCRIPT', speakers: [{ name: 'A', voice: 'alloy' }], cache_key: 'k' },
         questions: [{ id: 'l1', prompt: 'Que veut-il ?', type: 'short_text', answer: 'SECRET ANSWER', explanation: 'hidden' }]
       }

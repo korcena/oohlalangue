@@ -37,12 +37,17 @@ with mocked dependencies; see `npm test`.
 
 - [ ] Landing → Worksheet card and the deep link `#/worksheet` both open the generation form.
 - [ ] Choose length/listening (the subject is auto-selected) → Generate shows a loading state,
-      then renders sections with French titles and English explanations.
+      then renders sections with French titles, French instructions and French-only prompts.
+- [ ] Every question prompt and every choice option is French with no English translation, gloss
+      or hint (e.g. never "(What's your name?)").
+- [ ] The `Compréhension écrite` section shows its reading passage **before** reveal, above that
+      section's questions (visible in the DOM, not just visually).
 - [ ] With no manual topic input, the rendered fiche title is drawn from the A1 curriculum and
       matches the auto-selected subject. Each generation is judged independently; repeated picks
       across generations are allowed.
 - [ ] With no text provider configured, Generate shows the server's actionable error and renders
       no worksheet (never fabricated content).
+- [ ] No "Indice" control exists anywhere in the worksheet DOM.
 - [ ] Before reveal, inspect the DOM (not just the visual): no answer text and no listening
       transcript text nodes are present anywhere.
 - [ ] Type answers; the save-state shows **Enregistrement… → Enregistré** (text label, not colour
@@ -69,8 +74,9 @@ with mocked dependencies; see `npm test`.
 - [ ] "Vérifier / Voir les réponses" reveals the answer key (and transcript) adjacent to each
       question; the reveal state survives refresh.
 - [ ] "Envoyer au professeur" disables while in flight and renders feedback next to each answer:
-      original + explicit **Correct / Mistake / Alternative** label + correction + explanation +
-      error type (meaning never depends on colour alone).
+      **Ta réponse** + explicit **Correct / Erreur / Alternative** label + correction + explanation +
+      error type (meaning never depends on colour alone). Feedback, correction, explanation and
+      summary are all written in French.
 - [ ] The summary card shows strengths (Points forts), recurring mistakes (Erreurs récurrentes),
       priorities (Priorités) and follow-up (Exercice de suivi).
 - [ ] Refresh keeps feedback.

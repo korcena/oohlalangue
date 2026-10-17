@@ -12,6 +12,7 @@ const {
   withOneRetry,
   ProviderError,
   buildSystemPrompt,
+  buildFeedbackPrompt,
   normalizeWorksheet,
   normalizeAnswers,
   extractJson,
@@ -411,17 +412,18 @@ const validWorksheet = {
     {
       id: 'listening',
       title_fr: 'Compréhension orale',
-      explanation_en: 'Listen and answer.',
+      instructions_fr: 'Écoute et réponds.',
       audio: { script: 'Bonjour ! Tu veux un café ?', speakers: [{ name: 'A', voice: 'alloy' }], cache_key: '' },
       questions: [
-        { id: 'l1', prompt: 'Que veut le client ?', type: 'choice', options: ['un café', 'un thé'], answer: 'un café', explanation: 'He orders a coffee.' }
+        { id: 'l1', prompt: 'Que veut le client ?', type: 'choice', options: ['un café', 'un thé'], answer: 'un café', explanation: 'Le client commande un café.' }
       ]
     },
     {
       id: 'reading',
       title_fr: 'Compréhension écrite',
-      explanation_en: 'Read and answer.',
-      questions: [{ id: 'r1', prompt: 'Où ?', type: 'short_text', answer: 'au café', explanation: 'Location.' }]
+      instructions_fr: 'Lis et réponds.',
+      text_fr: 'Paul entre dans un café et commande un café.',
+      questions: [{ id: 'r1', prompt: 'Où ?', type: 'short_text', answer: 'au café', explanation: 'Lieu.' }]
     }
   ]
 };
@@ -441,6 +443,11 @@ test('POST /api/generate accepts a valid worksheet and computes the audio cache 
     assert.equal(body.sections[0].id, 'listening');
     assert.match(body.sections[0].audio.cache_key, /^[a-f0-9]{32}$/);
     assert.equal(body.sections.length, 2);
+    // The outgoing request carries the worksheet system prompt; pin the two
+    // rules that keep the fiche French-only and the reading passage present.
+    const systemPrompt = fetchImpl.calls[0].body.messages[0].content;
+    assert.match(systemPrompt, /EVERY learner-facing string MUST be written in French only/);
+    assert.match(systemPrompt, /The "text_fr" field MUST appear ONLY on the "reading" section/);
   });
 });
 
@@ -492,7 +499,8 @@ const invalidWorksheet = {
     {
       id: 'reading',
       title_fr: 'Lecture',
-      explanation_en: 'Read.',
+      instructions_fr: 'Lis.',
+      text_fr: 'Un texte.',
       questions: [{ id: 'q1', prompt: 'Pick', type: 'choice', answer: 'a', explanation: 'x' }]
     }
   ]
@@ -503,6 +511,36 @@ test('POST /api/generate repairs once then 502s when still invalid', async () =>
   const fetchImpl = makeFetchMock(() => {
     call += 1;
     return jsonResponse(200, { message: { content: JSON.stringify(invalidWorksheet) } });
+  });
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topic: 'x' })
+    });
+    assert.equal(res.status, 502);
+    assert.equal(call, 2, 'expected exactly one repair retry');
+  });
+});
+
+const noInstructionsWorksheet = {
+  topic: 'Sans consigne',
+  sections: [
+    {
+      id: 'reading',
+      title_fr: 'Lecture',
+      text_fr: 'Un texte.',
+      questions: [{ id: 'q1', prompt: 'p', type: 'short_text', answer: 'a', explanation: 'x' }]
+    }
+  ]
+};
+
+test('POST /api/generate repairs once then 502s when a section lacks instructions_fr', async () => {
+  let call = 0;
+  const fetchImpl = makeFetchMock(() => {
+    call += 1;
+    return jsonResponse(200, { message: { content: JSON.stringify(noInstructionsWorksheet) } });
   });
   const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
   await withServer(app, async (base) => {
@@ -541,7 +579,7 @@ test('POST /api/feedback validates shape and preserves the original answer', asy
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        worksheet: { topic: 'x', sections: [{ id: 'reading', title_fr: 't', explanation_en: 'e', questions: [{ id: 'r1', prompt: 'p', type: 'short_text', answer: 'a', explanation: 'x' }] }] },
+        worksheet: { topic: 'x', sections: [{ id: 'reading', title_fr: 't', instructions_fr: 'e', text_fr: 'Un texte.', questions: [{ id: 'r1', prompt: 'p', type: 'short_text', answer: 'a', explanation: 'x' }] }] },
         answers: { r1: 'Je vais au cafe' }
       })
     });
@@ -549,6 +587,56 @@ test('POST /api/feedback validates shape and preserves the original answer', asy
     const body = await res.json();
     assert.equal(body.answers[0].original, 'Je vais au cafe');
   });
+});
+
+test('POST /api/feedback sends a French-only system prompt', async () => {
+  const feedback = {
+    answers: [
+      { question_id: 'r1', original: 'x', verdict: 'correct', correction: 'x', explanation: 'y', error_type: 'style' }
+    ],
+    summary: { strengths: [], recurring_mistakes: [], priorities: [], follow_up: 'next' }
+  };
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, { message: { content: JSON.stringify(feedback) } }));
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        worksheet: { topic: 'x', sections: [{ id: 'reading', title_fr: 't', instructions_fr: 'e', text_fr: 'Un texte.', questions: [{ id: 'r1', prompt: 'p', type: 'short_text', answer: 'a', explanation: 'x' }] }] },
+        answers: { r1: 'x' }
+      })
+    });
+    assert.equal(res.status, 200);
+    const system = fetchImpl.calls[0].body.messages[0].content;
+    assert.match(system, /French only/i);
+  });
+});
+
+test('buildFeedbackPrompt includes the reading text and the listening script', () => {
+  const worksheet = {
+    topic: 'x',
+    sections: [
+      {
+        id: 'listening',
+        title_fr: 'Écoute',
+        instructions_fr: 'e',
+        audio: { script: 'LE SCRIPT ORAL' },
+        questions: [{ id: 'l1', prompt: 'p', type: 'short_text', answer: 'a' }]
+      },
+      {
+        id: 'reading',
+        title_fr: 'Lis',
+        instructions_fr: 'e',
+        text_fr: 'LE TEXTE À LIRE',
+        questions: [{ id: 'r1', prompt: 'p', type: 'short_text', answer: 'a' }]
+      }
+    ]
+  };
+  const prompt = buildFeedbackPrompt(worksheet, {});
+  assert.ok(prompt.includes('LE SCRIPT ORAL'), 'listening script must be included');
+  assert.ok(prompt.includes('LE TEXTE À LIRE'), 'reading text must be included');
+  assert.match(prompt, /French only/);
 });
 
 // ---------------------------------------------------------------------------
@@ -758,4 +846,41 @@ test('normalizeWorksheet defaults level and recomputes cache key', () => {
   const out = normalizeWorksheet({ ...validWorksheet, level: undefined });
   assert.equal(out.level, 'A1');
   assert.ok(out.sections[0].audio.cache_key);
+});
+
+test('normalizeWorksheet strips hint and explanation_en and preserves instructions_fr/text_fr', () => {
+  const input = {
+    topic: 'x',
+    level: 'A1',
+    sections: [
+      {
+        id: 'reading',
+        title_fr: 'Lis',
+        explanation_en: 'English legacy section',
+        instructions_fr: 'Lis le texte.',
+        text_fr: 'Le texte.',
+        hint: 'section hint',
+        questions: [
+          {
+            id: 'q1',
+            prompt: 'p',
+            type: 'short_text',
+            answer: 'a',
+            explanation: 'x',
+            hint: 'question hint'
+          }
+        ]
+      }
+    ]
+  };
+  const out = normalizeWorksheet(input);
+  const sec = out.sections[0];
+  assert.equal(sec.instructions_fr, 'Lis le texte.');
+  assert.equal(sec.text_fr, 'Le texte.');
+  assert.equal(sec.hint, undefined);
+  assert.equal(sec.explanation_en, undefined);
+  assert.equal(sec.questions[0].hint, undefined);
+  // The input must not be mutated (normalize works on copies).
+  assert.equal(input.sections[0].hint, 'section hint');
+  assert.equal(input.sections[0].questions[0].hint, 'question hint');
 });

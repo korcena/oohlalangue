@@ -123,7 +123,8 @@ The existing **10-answers-per-3-hour pause session limit is kept exactly as-is**
 
 1. **Generate:** learner picks a topic and length (and optionally includes the listening
    section); the client calls `/api/generate`.
-2. **Render:** sections with French labels and simple English explanations; answer fields.
+2. **Render:** sections with French labels, French instructions and French-only prompts/options;
+   answer fields.
 3. **Listening (Compréhension orale):** the worksheet includes an original French
    narration/conversation (script generated server-side, with distinct speaker voices for
    dialogues). The client requests `/api/tts`, plays the audio, and lets the learner replay it
@@ -131,19 +132,23 @@ The existing **10-answers-per-3-hour pause session limit is kept exactly as-is**
    until the answers are revealed/submitted.**
 4. **Autosave:** answers persist to `localStorage` with saving/saved/failed states; on failure
    the text is retained and the learner is warned (never silently dropped).
-5. **Hint / Reveal:** an optional hint; a "show answers" reveal (including the listening
-   transcript). Answers are generated server-side and stored in the payload but hidden until
-   revealed.
+5. **Reveal:** a "show answers" reveal (including the listening transcript). Answers are
+   generated server-side and stored in the payload but hidden until revealed.
 6. **Send to teacher:** "Envoyer au professeur" posts the worksheet + answers to
    `/api/feedback`.
 7. **Feedback:** the response renders **adjacent to each answer** — original preserved,
    correction immediately after, with explicit text labels (not colour alone); plus a concise
-   summary (strengths, recurring mistakes, 2–3 priorities, one follow-up exercise).
+   summary (strengths, recurring mistakes, 2–3 priorities, one follow-up exercise). Correction,
+   explanation and summary are written in French only.
 8. **Resume:** reopening the Worksheet view restores the same worksheet, answers, and cached
    audio; "New worksheet" explicitly archives/clears the current one and its cached clips.
 9. **Audio cache:** on first play, the clip is fetched from `/api/tts` and stored in IndexedDB
    keyed by a hash of the script + voice settings; on resume it is played from cache with **no
    repeat TTS charge**.
+
+All learner-facing worksheet content (title, instructions, reading passage, prompts, options,
+answers, explanations and feedback) is written in French only, with no English translations or
+glosses.
 
 ## 7. Storage schema (`lib/storage.js`)
 
@@ -204,7 +209,8 @@ The model name is never hardcoded into prompts; `/health` reports which provider
     {
       "id": "listening|reading|translation_grammar|writing",
       "title_fr": "string",
-      "explanation_en": "string",
+      "instructions_fr": "string",
+      "text_fr": "string (French reading passage — reading section only, required there)",
       "audio": {
         "script": "string (hidden until reveal)",
         "speakers": [{ "name": "string", "voice": "string" }],
@@ -225,10 +231,13 @@ The model name is never hardcoded into prompts; `/health` reports which provider
 }
 ```
 
-The `audio` block is present only on the `listening` section. Its `script` and each question's
+The `audio` block is present only on the `listening` section. The `text_fr` passage is present
+only on the `reading` section and is required (non-empty) there. Its `script` and each question's
 `answer` are hidden from the rendered worksheet until the learner reveals/submits. The
 questions must be answerable **solely** from the audio, and the script, questions, and answer
-key are generated and validated together. Distinct `speakers` use distinct TTS voices.
+key are generated and validated together. Distinct `speakers` use distinct TTS voices. Every
+learner-facing string (`title_fr`, `instructions_fr`, `text_fr`, prompts, options, answers and
+explanations) is written in French only.
 
 `/api/tts` accepts `{ utterances, speakers, cache_key }`, where `utterances` is an ordered list
 of `{ speaker, text }` lines. Because OpenAI TTS produces a single voice per call, dialogues

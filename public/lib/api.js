@@ -8,14 +8,14 @@ import { storage } from './storage.js';
 
 export class ApiError extends Error {
   constructor(message, { status = 0, data = null } = {}) {
-    super(message || 'Request failed');
+    super(message || 'Échec de la requête');
     this.name = 'ApiError';
     this.status = status;
     this.data = data;
   }
 }
 
-export function normalizeErrorMessage(data, fallback = 'Request failed') {
+export function normalizeErrorMessage(data, fallback = 'Échec de la requête') {
   if (!data) return fallback;
   if (typeof data === 'string') return data;
   const err = data.error;
@@ -34,7 +34,7 @@ export function authHeaders() {
 export async function request(path, options = {}, deps = {}) {
   const { method = 'POST', body, headers = {}, auth = true } = options;
   const fetchImpl = deps.fetchImpl || (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
-  if (!fetchImpl) throw new ApiError('This browser does not support fetch()', { status: 0 });
+  if (!fetchImpl) throw new ApiError('Ce navigateur ne prend pas en charge fetch()', { status: 0 });
 
   const finalHeaders = Object.assign(
     { 'Content-Type': 'application/json' },
@@ -50,7 +50,7 @@ export async function request(path, options = {}, deps = {}) {
       body: body === undefined ? undefined : JSON.stringify(body)
     });
   } catch (err) {
-    throw new ApiError('Network error: ' + (err && err.message ? err.message : String(err)), { status: 0 });
+    throw new ApiError('Erreur réseau : ' + (err && err.message ? err.message : String(err)), { status: 0 });
   }
 
   let data = null;
@@ -64,7 +64,7 @@ export async function request(path, options = {}, deps = {}) {
   }
 
   if (!res.ok) {
-    throw new ApiError(normalizeErrorMessage(data, `Request failed (${res.status})`), {
+    throw new ApiError(normalizeErrorMessage(data, `Échec de la requête (${res.status})`), {
       status: res.status,
       data
     });

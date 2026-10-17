@@ -195,7 +195,8 @@ Structured worksheet shape (see `docs/superpowers/specs/` for the full contract)
     {
       "id": "listening | reading | translation_grammar | writing",
       "title_fr": "string",
-      "explanation_en": "string",
+      "instructions_fr": "string",
+      "text_fr": "string (reading only)",
       "audio": { "script": "…", "speakers": [{ "name": "A", "voice": "alloy" }], "cache_key": "…" },
       "questions": [
         { "id": "string", "prompt": "string", "type": "short_text|choice|fill_blank|translation",
@@ -206,8 +207,11 @@ Structured worksheet shape (see `docs/superpowers/specs/` for the full contract)
 }
 ```
 
-The `audio` block appears **only** on the `listening` section. Provider output is validated
-server-side; invalid JSON gets one repair retry, then a clear `502` (never partial content).
+The `audio` block appears **only** on the `listening` section; `text_fr` (the French reading
+passage) appears **only** on the `reading` section and is required there. Every learner-facing
+string — titles, instructions, passage, prompts, options, answers and explanations — is written
+in French only. Provider output is validated server-side; invalid JSON gets one repair retry,
+then a clear `502` (never partial content).
 
 ---
 

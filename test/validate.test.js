@@ -27,14 +27,15 @@ function worksheet(overrides = {}) {
         {
           id: 'reading',
           title_fr: 'Compréhension écrite',
-          explanation_en: 'Read the text and answer.',
+          instructions_fr: 'Lis le texte et réponds.',
+          text_fr: 'Le marchand vend des pommes au marché.',
           questions: [
             {
               id: 'r1',
               prompt: 'Que vend le marchand ?',
               type: 'short_text',
               answer: 'des pommes',
-              explanation: 'He sells apples.'
+              explanation: 'Il vend des pommes.'
             }
           ]
         }
@@ -48,7 +49,7 @@ function listening(overrides = {}) {
   return {
     id: 'listening',
     title_fr: 'Compréhension orale',
-    explanation_en: 'Listen and answer.',
+    instructions_fr: 'Écoute et réponds.',
     audio: {
       script: 'Bonjour ! Une baguette, s’il vous plaît.',
       speakers: [{ name: 'Client', voice: 'alloy' }],
@@ -86,6 +87,41 @@ test('audio is only allowed on the listening section', () => {
   const result = validateWorksheet(withAudioOnReading);
   assert.equal(result.ok, false);
   assert.ok(result.errors.some((e) => /audio must only appear on the listening section/.test(e)));
+});
+
+test('a section missing instructions_fr is rejected', () => {
+  const bad = worksheet();
+  delete bad.sections[0].instructions_fr;
+  const result = validateWorksheet(bad);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((e) => /instructions_fr must be a non-empty string/.test(e)));
+});
+
+test('text_fr is required and non-empty on the reading section', () => {
+  const missing = worksheet();
+  delete missing.sections[0].text_fr;
+  const missingResult = validateWorksheet(missing);
+  assert.equal(missingResult.ok, false);
+  assert.ok(missingResult.errors.some((e) => /text_fr must be a non-empty string for the reading section/.test(e)));
+
+  const empty = worksheet();
+  empty.sections[0].text_fr = '   ';
+  const emptyResult = validateWorksheet(empty);
+  assert.equal(emptyResult.ok, false);
+  assert.ok(emptyResult.errors.some((e) => /text_fr must be a non-empty string for the reading section/.test(e)));
+});
+
+test('text_fr is only allowed on the reading section', () => {
+  const sec = listening();
+  sec.text_fr = 'Du texte interdit ici.';
+  const result = validateWorksheet(worksheet({ sections: [sec] }));
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((e) => /text_fr must only appear on the reading section/.test(e)));
+});
+
+test('a valid reading section with a non-empty text_fr passes', () => {
+  const result = validateWorksheet(worksheet());
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
 });
 
 test('listening requires a non-empty script and at least one speaker', () => {

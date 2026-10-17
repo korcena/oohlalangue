@@ -16,7 +16,7 @@ const sampleWorksheet = () => ({
     {
       id: 'listening',
       title_fr: 'Compréhension orale',
-      explanation_en: 'Listen to the dialogue.',
+      instructions_fr: 'Écoute le dialogue.',
       audio: {
         script: 'SECRET TRANSCRIPT',
         speakers: [{ name: 'A', voice: 'alloy' }],
@@ -35,27 +35,67 @@ const sampleWorksheet = () => ({
     {
       id: 'reading',
       title_fr: 'Compréhension écrite',
-      explanation_en: 'Read the text.',
+      instructions_fr: 'Lis le texte.',
+      text_fr: 'TEXTE DE LECTURE',
       questions: [
-        { id: 'r1', prompt: 'Vrai ou faux ?', type: 'choice', options: ['Vrai', 'Faux'], answer: 'Vrai', explanation: 'It is true.' }
+        { id: 'r1', prompt: 'Vrai ou faux ?', type: 'choice', options: ['Vrai', 'Faux'], answer: 'Vrai', explanation: 'C’est vrai.' }
       ]
     }
   ]
 });
 
-test('buildRenderModel hides answers, explanations and the transcript until reveal', async () => {
+test('buildRenderModel hides answers, explanations and the transcript but keeps instructions and passage', async () => {
   const { buildRenderModel } = await loadHelpers();
-  const initial = JSON.stringify(buildRenderModel(sampleWorksheet(), { reveal: false }));
+  const model = buildRenderModel(sampleWorksheet(), { reveal: false });
+  const initial = JSON.stringify(model);
   assert.ok(!initial.includes('SECRET ANSWER'));
   assert.ok(!initial.includes('SECRET EXPLANATION'));
   assert.ok(!initial.includes('SECRET TRANSCRIPT'));
+  assert.ok(!initial.includes('hint'), 'the render model must not emit a hint field');
+  assert.ok(!initial.includes('explanation_en'), 'the legacy English field must not be emitted');
   assert.ok(initial.includes('Compréhension orale'));
   assert.ok(initial.includes('Que veut A ?'));
 
-  const revealed = JSON.stringify(buildRenderModel(sampleWorksheet(), { reveal: true }));
+  const listening = model.sections.find((s) => s.id === 'listening');
+  assert.equal(listening.instructions, 'Écoute le dialogue.');
+  assert.ok(!('hint' in listening.questions[0]), 'the question model must not carry a hint key');
+
+  const reading = model.sections.find((s) => s.id === 'reading');
+  assert.equal(reading.instructions, 'Lis le texte.');
+  assert.equal(reading.passage, 'TEXTE DE LECTURE');
+
+  // The passage is an input, not reveal-gated: it must be present both before
+  // and after reveal (regression test for the missing reading text).
+  const revealedModel = buildRenderModel(sampleWorksheet(), { reveal: true });
+  const revealedReading = revealedModel.sections.find((s) => s.id === 'reading');
+  assert.equal(revealedReading.passage, 'TEXTE DE LECTURE');
+
+  const revealed = JSON.stringify(revealedModel);
   assert.ok(revealed.includes('SECRET ANSWER'));
   assert.ok(revealed.includes('SECRET EXPLANATION'));
   assert.ok(revealed.includes('SECRET TRANSCRIPT'));
+});
+
+test('buildRenderModel falls back to explanation_en and an empty passage for legacy fiches', async () => {
+  const { buildRenderModel } = await loadHelpers();
+  const legacy = {
+    topic: 'x',
+    sections: [
+      {
+        id: 'reading',
+        title_fr: 'Lecture',
+        explanation_en: 'Ancienne consigne.',
+        hint: 'ancien indice',
+        questions: [
+          { id: 'q1', prompt: 'p', type: 'short_text', hint: 'q hint', answer: 'a', explanation: 'e' }
+        ]
+      }
+    ]
+  };
+  const model = buildRenderModel(legacy, { reveal: false });
+  assert.equal(model.sections[0].instructions, 'Ancienne consigne.');
+  assert.equal(model.sections[0].passage, '');
+  assert.ok(!('hint' in model.sections[0].questions[0]));
 });
 
 test('buildRenderModel keeps choice options and never emits an audio script on non-listening sections', async () => {
@@ -117,9 +157,18 @@ test('feedbackToUi preserves worksheet question order and keeps original adjacen
 
   const r1 = rows[1];
   assert.equal(r1.original, 'Faux');
-  assert.equal(r1.verdictLabel, 'Mistake');
+  assert.equal(r1.verdictLabel, 'Erreur');
   assert.equal(r1.correction, 'Vrai');
-  assert.equal(r1.errorTypeLabel, 'Error');
+  assert.equal(r1.errorTypeLabel, 'Erreur');
+});
+
+test('verdict and error-type labels are French only', async () => {
+  const { VERDICT_LABELS, ERROR_TYPE_LABELS } = await loadHelpers();
+  assert.equal(VERDICT_LABELS.mistake, 'Erreur');
+  assert.equal(ERROR_TYPE_LABELS.error, 'Erreur');
+  const labels = [...Object.values(VERDICT_LABELS), ...Object.values(ERROR_TYPE_LABELS)].join(' ');
+  assert.ok(!/mistake/i.test(labels), 'no English "Mistake" label must remain');
+  assert.ok(!/error/i.test(labels), 'no English "Error" label must remain');
 });
 
 test('feedbackToUi returns unanswered questions as empty rows with feedback absent', async () => {
