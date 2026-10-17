@@ -59,6 +59,7 @@ See `.env.example` for the secret-free template.
 | `OLLAMA_BASE_URL` | Ollama Cloud base URL (default `https://ollama.com/api/chat`). |
 | `OLLAMA_API_KEY` | Ollama Cloud API key. |
 | `OLLAMA_MODEL` | Ollama Cloud model name. **No hardcoded default** — set the model available to your account. |
+| `OLLAMA_THINK` | Optional; default `false`. Set `true` to surface model reasoning (not recommended — reasoning can exhaust the token budget and leave the reply empty). |
 | `OPENAI_API_KEY` | OpenAI key (text provider `openai` and/or TTS). |
 | `OPENAI_MODEL` | OpenAI text model name. |
 | `OPENAI_TTS_MODEL` | OpenAI TTS model (e.g. `gpt-4o-mini-tts`). |

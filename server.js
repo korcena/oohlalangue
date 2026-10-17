@@ -564,6 +564,9 @@ function makeProviders({ httpRequest = defaultHttpRequest, env = process.env } =
         );
       }
       const url = env.OLLAMA_BASE_URL || 'https://ollama.com/api/chat';
+      // Thinking models otherwise spend the token budget on reasoning and leave
+      // message.content empty. Off by default so replies stay direct/JSON.
+      const think = String(env.OLLAMA_THINK || '').trim().toLowerCase() === 'true';
       const chatMessages = system ? [{ role: 'system', content: system }, ...(messages || [])] : messages || [];
       const { data } = await withOneRetry(() =>
         requestJson({
@@ -573,7 +576,7 @@ function makeProviders({ httpRequest = defaultHttpRequest, env = process.env } =
             'Content-Type': 'application/json',
             Authorization: `Bearer ${env.OLLAMA_API_KEY}`
           },
-          body: { model: env.OLLAMA_MODEL, stream: false, messages: chatMessages, options: { num_predict: maxTokens } },
+          body: { model: env.OLLAMA_MODEL, stream: false, think, messages: chatMessages, options: { num_predict: maxTokens } },
           timeoutMs,
           label: 'Ollama'
         })

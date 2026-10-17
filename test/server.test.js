@@ -136,9 +136,50 @@ test('ollama provider builds the expected URL/headers/body and parses message.co
   assert.equal(call.url, 'https://ollama.test/api/chat');
   assert.equal(call.headers.Authorization, 'Bearer secret');
   assert.equal(call.body.model, 'llama-test');
+  assert.equal(call.body.think, false);
   assert.equal(call.body.messages[0].role, 'system');
   assert.equal(call.body.messages[0].content, 'SYS');
   assert.equal(call.body.options.num_predict, 123);
+});
+
+test('ollama provider applies the strict, trimmed, case-insensitive OLLAMA_THINK rule', async () => {
+  const cases = [
+    ['true', true],
+    ['TRUE', true],
+    [' true ', true],
+    ['True', true],
+    ['false', false],
+    ['0', false],
+    ['yes', false],
+    ['', false],
+    ['truex', false],
+    [undefined, false]
+  ];
+  for (const [value, expected] of cases) {
+    const env = { OLLAMA_API_KEY: 'secret', OLLAMA_MODEL: 'llama-test' };
+    if (value !== undefined) env.OLLAMA_THINK = value;
+    const fetchImpl = makeFetchMock(() => jsonResponse(200, { message: { content: 'ok' } }));
+    const providers = makeProviders({ httpRequest: fetchImpl, env });
+    await providers.ollama.chatCompletion({ system: 'SYS', messages: [{ role: 'user', content: 'hi' }] });
+    assert.equal(
+      fetchImpl.calls[0].body.think,
+      expected,
+      `OLLAMA_THINK=${JSON.stringify(value)} should map to think:${expected}`
+    );
+  }
+});
+
+test('ollama empty content still rejects with the 502 empty-response fallback and no retry', async () => {
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, { message: { content: '' } }));
+  const providers = makeProviders({
+    httpRequest: fetchImpl,
+    env: { OLLAMA_API_KEY: 'secret', OLLAMA_MODEL: 'llama-test' }
+  });
+  await assert.rejects(
+    () => providers.ollama.chatCompletion({ system: 'SYS', messages: [{ role: 'user', content: 'hi' }] }),
+    (err) => err instanceof ProviderError && /Ollama returned an empty response/.test(err.message) && err.status === 502
+  );
+  assert.equal(fetchImpl.calls.length, 1);
 });
 
 test('openai provider builds the expected URL/headers/body and parses choices[0].message.content', async () => {
@@ -150,6 +191,7 @@ test('openai provider builds the expected URL/headers/body and parses choices[0]
   assert.equal(call.url, 'https://api.openai.com/v1/chat/completions');
   assert.equal(call.headers.Authorization, 'Bearer sk-test');
   assert.equal(call.body.model, 'gpt-test');
+  assert.ok(!('think' in call.body), 'openai body must not carry the ollama think flag');
   assert.equal(call.body.messages[0].role, 'system');
 });
 
