@@ -373,6 +373,7 @@ export function mount(container, ctx) {
   function renderSection(section, feedbackById) {
     const card = el('section', 'section-card');
     card.appendChild(el('h3', null, section.title));
+    if (section.topic) card.appendChild(el('p', 'section-topic', section.topic));
     if (section.instructions) card.appendChild(el('p', 'section-expl', section.instructions));
 
     // The reading passage is an input (not a secret): always visible, above

@@ -84,6 +84,7 @@ export function buildRenderModel(worksheet, { reveal = false } = {}) {
       const model = {
         id: str(sec.id),
         title: str(sec.title_fr) || sectionLabel(sec.id),
+        topic: str(sec.topic_fr),
         instructions: str(sec.instructions_fr) || str(sec.explanation_en),
         passage: str(sec.text_fr),
         questions: (Array.isArray(sec.questions) ? sec.questions : []).map((question) => {

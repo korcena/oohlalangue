@@ -27,6 +27,7 @@ function worksheet(overrides = {}) {
         {
           id: 'reading',
           title_fr: 'Compréhension écrite',
+          topic_fr: 'La Famille',
           instructions_fr: 'Lis le texte et réponds.',
           text_fr: 'Le marchand vend des pommes au marché.',
           questions: [
@@ -49,6 +50,7 @@ function listening(overrides = {}) {
   return {
     id: 'listening',
     title_fr: 'Compréhension orale',
+    topic_fr: 'Les Fruits',
     instructions_fr: 'Écoute et réponds.',
     audio: {
       script: 'Bonjour ! Une baguette, s’il vous plaît.',
@@ -56,7 +58,33 @@ function listening(overrides = {}) {
       cache_key: ''
     },
     questions: [
-      { id: 'l1', prompt: 'Que demande le client ?', type: 'choice', options: ['une baguette', 'un café'], answer: 'une baguette', explanation: 'He asks for a baguette.' }
+      {
+        id: 'l1',
+        prompt: 'Que demande le client ?',
+        type: 'choice',
+        options: ['une baguette', 'un café', 'un croissant'],
+        answer: 'une baguette',
+        explanation: 'Le client demande une baguette.'
+      }
+    ],
+    ...overrides
+  };
+}
+
+function writing(overrides = {}) {
+  return {
+    id: 'writing',
+    title_fr: 'Expression écrite',
+    topic_fr: 'La Nourriture',
+    instructions_fr: 'Réponds au message en environ 40 mots.',
+    questions: [
+      {
+        id: 'w1',
+        prompt: 'Ton ami t’invite à dîner. Réponds en environ 40 mots.',
+        type: 'short_text',
+        answer: 'Merci pour ton invitation ! Je viens avec plaisir.',
+        explanation: 'La réponse accepte l’invitation.'
+      }
     ],
     ...overrides
   };
@@ -150,6 +178,57 @@ test('every question requires id, prompt, answer and explanation', () => {
   assert.ok(result.errors.some((e) => /\.id must be a non-empty string/.test(e)));
   assert.ok(result.errors.some((e) => /\.answer must be a non-empty string/.test(e)));
   assert.ok(result.errors.some((e) => /\.explanation must be a non-empty string/.test(e)));
+});
+
+test('every section requires a non-empty French topic_fr', () => {
+  const missing = worksheet();
+  delete missing.sections[0].topic_fr;
+  const missingResult = validateWorksheet(missing);
+  assert.equal(missingResult.ok, false);
+  assert.ok(missingResult.errors.some((e) => /topic_fr must be a non-empty string/.test(e)));
+
+  const empty = worksheet();
+  empty.sections[0].topic_fr = '   ';
+  const emptyResult = validateWorksheet(empty);
+  assert.equal(emptyResult.ok, false);
+  assert.ok(emptyResult.errors.some((e) => /topic_fr must be a non-empty string/.test(e)));
+});
+
+test('listening questions must be multiple choice', () => {
+  const sec = listening();
+  sec.questions[0].type = 'short_text';
+  const result = validateWorksheet(worksheet({ sections: [sec] }));
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((e) => /type must be "choice" for the listening section/.test(e)));
+});
+
+test('listening choice questions require exactly 3 options', () => {
+  const two = listening();
+  two.questions[0].options = ['une baguette', 'un café'];
+  const twoResult = validateWorksheet(worksheet({ sections: [two] }));
+  assert.equal(twoResult.ok, false);
+  assert.ok(
+    twoResult.errors.some((e) => /options must contain exactly 3 options for the listening section/.test(e))
+  );
+
+  const four = listening();
+  four.questions[0].options = ['une baguette', 'un café', 'un croissant', 'un jus'];
+  const fourResult = validateWorksheet(worksheet({ sections: [four] }));
+  assert.equal(fourResult.ok, false);
+  assert.ok(
+    fourResult.errors.some((e) => /options must contain exactly 3 options for the listening section/.test(e))
+  );
+});
+
+test('writing questions must be short_text production', () => {
+  const bad = writing();
+  bad.questions[0].type = 'fill_blank';
+  const result = validateWorksheet(worksheet({ sections: [bad] }));
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((e) => /type must be "short_text" for the writing section/.test(e)));
+
+  const valid = validateWorksheet(worksheet({ sections: [writing()] }));
+  assert.equal(valid.ok, true, JSON.stringify(valid.errors));
 });
 
 test('a valid worksheet with a listening section passes', () => {

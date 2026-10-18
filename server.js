@@ -242,6 +242,84 @@ function pickRandom(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+// Return a shuffled copy. Fisher–Yates over a copy so the curriculum array is
+// never mutated (the same array is also used by the chat prompt).
+function shuffleCopy(list, rng) {
+  const copy = list.slice();
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    // Clamp to [0, 1): an injected/test RNG returning exactly 1 would
+    // otherwise produce an out-of-range index and a null module.
+    const value = Number(rng());
+    const r = Number.isFinite(value) ? Math.min(0.999999999, Math.max(0, value)) : 0;
+    const j = Math.floor(r * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+// Assign one curriculum module per worksheet section, in section order. When
+// there are enough modules the themes are distinct; if not, the shuffled pool
+// is exhausted and reshuffled, so duplicates are unavoidable but only appear
+// after a full cycle. An injected RNG makes the result deterministic.
+function assignSectionTopics(sectionIds, { rng = Math.random, modules = CURRICULUM_MODULES } = {}) {
+  if (!Array.isArray(sectionIds) || sectionIds.length === 0) return [];
+  const pool = Array.isArray(modules) ? modules : [];
+  if (pool.length === 0) {
+    return sectionIds.map((id) => ({ id, module: null, focus: '', hint: '' }));
+  }
+
+  let shuffled = shuffleCopy(pool, rng);
+  let cursor = 0;
+  return sectionIds.map((id) => {
+    if (cursor >= shuffled.length) {
+      shuffled = shuffleCopy(pool, rng);
+      cursor = 0;
+    }
+    const mod = shuffled[cursor] || {};
+    cursor += 1;
+    return {
+      id,
+      module: typeof mod.module === 'string' ? mod.module : null,
+      focus: typeof mod.focus === 'string' ? mod.focus : '',
+      hint: typeof mod.hint === 'string' ? mod.hint : ''
+    };
+  });
+}
+
+// Compact worksheet title: distinct module names in order, whole-module
+// truncation with an ellipsis, and a stable fallback for empty input.
+function summarizeWorksheetTopic(assignments, maxLength = 60) {
+  const names = [];
+  const seen = new Set();
+  for (const item of Array.isArray(assignments) ? assignments : []) {
+    const raw = typeof item === 'string' ? item : item && typeof item.module === 'string' ? item.module : '';
+    const name = raw.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  if (names.length === 0) return 'Thèmes variés (A1)';
+
+  const limit = Number.isFinite(maxLength) ? maxLength : 60;
+  const full = names.join(' · ');
+  if (full.length <= limit) return full;
+
+  // Keep only whole module names, reserving one character for the ellipsis.
+  let out = '';
+  for (const name of names) {
+    const candidate = out ? `${out} · ${name}` : name;
+    if (candidate.length > limit - 1) break;
+    out = candidate;
+  }
+  if (!out) {
+    // No whole module fits: keep the first name intact rather than slicing
+    // it mid-word. Slightly exceeding the limit is preferable to a cryptic
+    // partial word.
+    return names[0];
+  }
+  return `${out}…`;
+}
+
 // Sanitize a single known-fact string from the client-side profile before
 // interpolating it into the system prompt. Same hygiene as the name.
 function sanitizeFact(raw) {
@@ -665,7 +743,7 @@ const QUESTION_TYPES = ['short_text', 'choice', 'fill_blank', 'translation'];
 const FEEDBACK_VERDICTS = ['correct', 'mistake', 'alternative'];
 const FEEDBACK_ERROR_TYPES = ['error', 'style', 'alternative'];
 
-const WORKSHEET_SYSTEM_PROMPT = `You are an experienced A1 (beginner) French teacher writing a short practice worksheet.
+const WORKSHEET_SYSTEM_PROMPT = `You are an experienced A1 (beginner) French teacher writing a DELF A1-style practice worksheet.
 You MUST reply with a SINGLE valid JSON object and NOTHING else: no markdown fences, no explanations, no trailing text.
 
 The object MUST match this shape exactly:
@@ -675,6 +753,7 @@ The object MUST match this shape exactly:
   "sections": [
     {
       "id": "listening | reading | translation_grammar | writing",
+      "topic_fr": "Le thème de cette section, en français",
       "title_fr": "Titre de la section, en français",
       "instructions_fr": "Consigne de la section, une phrase courte en français uniquement",
       "text_fr": "Le texte français à lire — uniquement pour la section reading",
@@ -699,15 +778,18 @@ The object MUST match this shape exactly:
 
 HARD RULES:
 - Use only these section ids: listening, reading, translation_grammar, writing.
+- Every section MUST have a non-empty "topic_fr" written in French. It MUST match the theme assigned to that section in the user prompt. Never give two sections the same theme.
 - The "audio" block MUST appear ONLY on the "listening" section. Never put it on other sections.
 - The "text_fr" field MUST appear ONLY on the "reading" section, and it MUST be a non-empty French A1 reading passage that the section's questions are based on. Never put "text_fr" on other sections.
-- Every listening section MUST have a non-empty "script" written entirely in simple A1 French and at least one speaker in "speakers". Questions must be answerable using the audio alone.
+- COMPRÉHENSION ORALE (DELF A1): The listening section is a short authentic-style A1 recording — 1–2 short messages/announcements or one short dialogue — on the assigned theme. Every listening question MUST be type "choice" with EXACTLY 3 options and ONE correct answer. Listening questions MUST test comprehension or inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), NOT verbatim word-matching. Never copy a whole sentence from the script into an option. Every question must be answerable from the audio alone.
 - DIALOGUE FORMAT (important for voicing): if the script has more than one speaker, write it as one line per turn, each line beginning with the speaker's name followed by a colon, e.g. "Marie: Bonjour !\\nPaul: Salut Marie !". Use exactly the speaker "name" values from "speakers", and give each a distinct "voice" value ("male" or "female") so the turns are voiced separately. For a single-speaker narration, write plain sentences and list one speaker.
+- COMPRÉHENSION ÉCRITE (DELF A1): "text_fr" is a short authentic-style A1 document (courriel, SMS, panneau, annonce, publicité, menu or message) on the assigned theme. Use a mix of "choice" questions (EXACTLY 3 options) and "short_text" questions. At least one question (preferably two) MUST require inference or deduction from the text; do not make every answer a sentence copied verbatim from "text_fr". Every question must be answerable from "text_fr" alone.
+- GRAMMAIRE: French-only grammar practice on the assigned theme. Use fill-in-the-blank (fill_blank), conjugation, singular/plural or masculine/feminine transforms, and reformulation of a FRENCH sentence (short_text). NEVER ask the learner to translate from English; never emit a "translation" question whose source sentence is English.
+- EXPRESSION ÉCRITE (DELF A1): Each writing question MUST be type "short_text". Its "prompt" MUST present a short French situation or message that the learner must understand (for example an invitation, an SMS, an announcement), then ask the learner to respond in French in environ 40–50 mots. The situation and the task are both written in French only. Never ask for a translation.
 - Every question MUST have: id, prompt, type, answer, explanation. "options" is REQUIRED when type is "choice" and must be omitted otherwise.
-- translation_grammar ("Grammaire"): French-only grammar practice. Use fill-in-the-blank (fill_blank), conjugation, singular/plural or masculine/feminine transforms, and reformulation of a FRENCH sentence (short_text). NEVER ask the learner to translate from English; never emit a "translation" question whose source sentence is English.
 - "answer" is the model answer / answer key. It is delivered to the client by design but hidden in the UI until reveal.
 - Keep vocabulary and grammar at A1 level. Use short sentences.
-- EVERY learner-facing string MUST be written in French only: "title_fr", "instructions_fr", "text_fr", "prompt", "options", "answer" and "explanation". Never write English — not even in parentheses, not as a translation or gloss.
+- EVERY learner-facing string MUST be written in French only: "topic_fr", "title_fr", "instructions_fr", "text_fr", "prompt", "options", "answer" and "explanation". Never write English — not even in parentheses, not as a translation or gloss.
 - Questions and options MUST NOT contain an English translation, gloss or hint (for example, never write "(What's your name?)").
 - Do not add any keys other than those shown.`;
 
@@ -718,26 +800,65 @@ function lengthToCounts(length) {
   return { reading: 4, translation_grammar: 4, writing: 1, listening: 3 };
 }
 
-function buildWorksheetPrompt({ topic, level = 'A1', length = 'medium', includeListening = true, name, profile } = {}) {
+function buildWorksheetPrompt({
+  topic,
+  level = 'A1',
+  length = 'medium',
+  includeListening = true,
+  name,
+  profile,
+  sectionTopics = []
+} = {}) {
   const counts = lengthToCounts(length);
   const safeLevel = sanitizeFact(level) || 'A1';
   const safeTopic = sanitizeFact(topic) || 'daily life at A1 level';
   const learner = sanitizeName(name) || 'a learner';
   const facts = sanitizeProfile(profile);
+
+  const byId = new Map();
+  for (const assignment of Array.isArray(sectionTopics) ? sectionTopics : []) {
+    if (assignment && assignment.id) byId.set(assignment.id, assignment);
+  }
+  const themeFor = (id) => {
+    const assignment = byId.get(id);
+    // Sanitize before interpolation even for the explicit caller topic: it is
+    // kept verbatim in the response, but must not carry quotes/newlines or
+    // instructions into the model prompt.
+    return assignment && assignment.module ? sanitizeFact(assignment.module) || safeTopic : safeTopic;
+  };
+  const focusFor = (id) => {
+    const assignment = byId.get(id);
+    return assignment && assignment.focus ? ` (focus: ${assignment.focus})` : '';
+  };
+  const hintFor = (id) => {
+    const assignment = byId.get(id);
+    return assignment && assignment.hint ? ` Inspiration (ne pas copier) : "${assignment.hint}".` : '';
+  };
+
   const lines = [];
-  lines.push(`Create a ${safeLevel} French practice worksheet about: "${safeTopic}".`);
-  lines.push(`The learner is ${learner}.`);
+  lines.push(`Create a ${safeLevel} French DELF A1-style practice worksheet. The learner is ${learner}.`);
   if (facts.length) lines.push(`Known about the learner: ${facts.join('; ')}.`);
+  lines.push(`Worksheet label: "${safeTopic}".`);
+  lines.push('Each section has its OWN theme; use the assigned theme below and do not reuse a theme across sections.');
   lines.push('');
   lines.push('Include these sections, in this order:');
   if (includeListening) {
-    lines.push(`- listening (Compréhension orale): an original French mini-dialogue or narration (${counts.listening} comprehension questions).`);
+    lines.push(
+      `- listening (Compréhension orale) — theme: "${themeFor('listening')}"${focusFor('listening')}.${hintFor('listening')} A short authentic-style A1 recording (1–2 short messages/announcements or one short dialogue) on this theme, with ${counts.listening} multiple-choice questions. Every question MUST be type "choice" with exactly 3 options and one correct answer. Test comprehension/inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), not verbatim word-matching; never copy a sentence from the script into an option.`
+    );
   }
-  lines.push(`- reading (Compréhension écrite): a short A1 French text in "text_fr" with ${counts.reading} questions that can be answered using that text alone.`);
-  lines.push(`- translation_grammar (Grammaire): ${counts.translation_grammar} French-only grammar exercises (fill in the blank, conjugation, singular/plural and masculine/feminine transforms, French sentence reformulation). Never English→French translation.`);
-  lines.push(`- writing (Expression écrite): ${counts.writing} short writing task(s).`);
+  lines.push(
+    `- reading (Compréhension écrite) — theme: "${themeFor('reading')}"${focusFor('reading')}. A short authentic-style A1 document (courriel, SMS, panneau, annonce, publicité, menu or message) in "text_fr" on this theme, with ${counts.reading} questions: a mix of "choice" questions (exactly 3 options) and "short_text" questions. At least one question (preferably two) must require inference from the text; do not make every answer a verbatim sentence from "text_fr".`
+  );
+  lines.push(
+    `- translation_grammar (Grammaire) — theme: "${themeFor('translation_grammar')}"${focusFor('translation_grammar')}. ${counts.translation_grammar} French-only grammar exercises on this theme (fill in the blank, conjugation, singular/plural and masculine/feminine transforms, French sentence reformulation). Never English→French translation.`
+  );
+  lines.push(
+    `- writing (Expression écrite) — theme: "${themeFor('writing')}"${focusFor('writing')}. ${counts.writing} DELF A1 production task(s). In each question prompt, write a short French situation/message the learner must understand (invitation, SMS, announcement, etc.) and ask them to reply in French in environ 40–50 mots. Use type "short_text" and a French-only prompt.`
+  );
   lines.push('');
-  lines.push('All learner-facing text (instructions_fr, text_fr, prompts, options, answers, explanations) must be written in French only, with no English translations or glosses.');
+  lines.push('Every section MUST include "topic_fr" set to the theme assigned above.');
+  lines.push('All learner-facing text (topic_fr, instructions_fr, text_fr, prompts, options, answers, explanations) must be written in French only, with no English translations or glosses.');
   lines.push('Respond with ONLY the JSON object described in the system instructions.');
   return lines.join('\n');
 }
@@ -777,6 +898,9 @@ function validateWorksheet(value) {
       seenSectionIds.add(section.id);
     }
     if (typeof section.title_fr !== 'string' || !section.title_fr.trim()) errors.push(`${where}.title_fr must be a non-empty string`);
+    if (typeof section.topic_fr !== 'string' || !section.topic_fr.trim()) {
+      errors.push(`${where}.topic_fr must be a non-empty string`);
+    }
     if (typeof section.instructions_fr !== 'string' || !section.instructions_fr.trim()) {
       errors.push(`${where}.instructions_fr must be a non-empty string`);
     }
@@ -833,6 +957,15 @@ function validateWorksheet(value) {
       }
       if (typeof q.prompt !== 'string' || !q.prompt.trim()) errors.push(`${qWhere}.prompt must be a non-empty string`);
       if (!QUESTION_TYPES.includes(q.type)) errors.push(`${qWhere}.type must be one of ${QUESTION_TYPES.join(' | ')}`);
+      if (isListening && q.type !== 'choice') {
+        errors.push(`${qWhere}.type must be "choice" for the listening section (DELF A1 multiple choice)`);
+      }
+      if (isListening && q.type === 'choice' && Array.isArray(q.options) && q.options.length !== 3) {
+        errors.push(`${qWhere}.options must contain exactly 3 options for the listening section`);
+      }
+      if (section.id === 'writing' && q.type !== 'short_text') {
+        errors.push(`${qWhere}.type must be "short_text" for the writing section`);
+      }
       if (q.type === 'choice') {
         if (!Array.isArray(q.options) || q.options.length === 0) {
           errors.push(`${qWhere}.options must be a non-empty array for choice questions`);
@@ -1128,19 +1261,59 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
     }
 
     const { topic, level = 'A1', length = 'medium', includeListening = true, name, profile } = req.body || {};
-    // Resolve the topic: a non-empty caller-supplied topic is honored as-is;
-    // otherwise the server picks a random A1 curriculum module. If the
-    // curriculum is somehow empty, fall back to `undefined` so
-    // buildWorksheetPrompt's own default applies (never throw).
+    // A non-empty caller-supplied topic is a legacy label kept verbatim in the
+    // response; otherwise the worksheet title is a summary of the assigned
+    // section themes. Either way each requested section gets its own distinct
+    // curriculum theme.
     const providedTopic = typeof topic === 'string' ? topic.trim() : '';
-    const autoSelected = !providedTopic;
-    const mod =
-      autoSelected && Array.isArray(CURRICULUM_MODULES) && CURRICULUM_MODULES.length
-        ? pickRandom(CURRICULUM_MODULES)
-        : null;
-    const promptTopic = providedTopic || (mod ? mod.module : undefined);
-    const userPrompt = buildWorksheetPrompt({ topic: promptTopic, level, length, includeListening, name, profile });
+    const sectionIds = includeListening
+      ? WORKSHEET_SECTION_IDS
+      : WORKSHEET_SECTION_IDS.filter((id) => id !== 'listening');
+    const pool = providedTopic
+      ? CURRICULUM_MODULES.filter((m) => m.module !== providedTopic)
+      : CURRICULUM_MODULES;
+    const assignments = assignSectionTopics(sectionIds, { modules: pool });
+
+    // Backward-compatible shim: the caller's label themes the first section,
+    // while the remaining sections still get distinct curriculum modules.
+    if (providedTopic && assignments.length) {
+      const match = CURRICULUM_MODULES.find((m) => m.module === providedTopic) || null;
+      assignments[0] = {
+        ...assignments[0],
+        module: providedTopic,
+        focus: match ? match.focus : '',
+        hint: match ? match.hint : ''
+      };
+    }
+
+    const promptTopic = providedTopic || summarizeWorksheetTopic(assignments);
+    const userPrompt = buildWorksheetPrompt({
+      topic: promptTopic,
+      level,
+      length,
+      includeListening,
+      name,
+      profile,
+      sectionTopics: assignments
+    });
     const timeoutMs = Number(env.AI_TIMEOUT_MS) || 45000;
+
+    // Respect the learner's section choice: a model that returns a section
+    // the caller did not request (for example listening with
+    // includeListening:false) must not reach the response. Malformed entries
+    // are kept so validation can reject them; if nothing requested remains,
+    // validation fails and the normal repair/error path runs.
+    const requestedSectionIds = new Set(sectionIds);
+    const restrictToRequestedSections = (value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.sections)) return value;
+      return {
+        ...value,
+        sections: value.sections.filter((section) => {
+          if (!section || typeof section !== 'object' || Array.isArray(section)) return true;
+          return requestedSectionIds.has(section.id);
+        })
+      };
+    };
 
     try {
       const first = await provider.chatCompletion({
@@ -1150,7 +1323,7 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
         timeoutMs
       });
 
-      let parsed = extractJson(first.text);
+      let parsed = restrictToRequestedSections(extractJson(first.text));
       let check = parsed ? validateWorksheet(parsed) : { ok: false, errors: ['response was not valid JSON'] };
 
       if (!check.ok) {
@@ -1164,7 +1337,7 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
           maxTokens: Number(env.WORKSHEET_MAX_TOKENS) || 3000,
           timeoutMs
         });
-        parsed = extractJson(repaired.text);
+        parsed = restrictToRequestedSections(extractJson(repaired.text));
         check = parsed ? validateWorksheet(parsed) : { ok: false, errors: ['repair response was not valid JSON'] };
         if (!check.ok) {
           console.error('[generate] invalid worksheet after repair:', check.errors);
@@ -1177,10 +1350,28 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
       }
 
       const normalized = normalizeWorksheet(parsed);
-      // On the auto-selected path, the fiche title must reflect the module we
-      // chose (normalizeWorksheet copies the model's own, possibly different,
-      // topic). The explicit path keeps the model-validated topic untouched.
-      if (mod) normalized.topic = mod.module;
+      // Server-authoritative per-section themes: overwrite the model's
+      // topic_fr with the assigned module for every returned section. The
+      // worksheet title is the caller's legacy label or a summary of the
+      // themes actually returned (so an omitted section never appears).
+      const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
+      for (const section of normalized.sections) {
+        const assignment = assignmentById.get(section.id);
+        if (assignment && assignment.module) section.topic_fr = assignment.module;
+      }
+      // If the model omitted the first requested section, the caller's explicit
+      // theme would otherwise disappear; show it on the first returned section.
+      if (providedTopic && normalized.sections.length && normalized.sections[0].id !== sectionIds[0]) {
+        normalized.sections[0].topic_fr = providedTopic;
+      }
+      if (providedTopic) {
+        normalized.topic = providedTopic;
+      } else {
+        const returnedThemes = normalized.sections
+          .map((section) => ({ module: section.topic_fr }))
+          .filter((assignment) => typeof assignment.module === 'string' && assignment.module.trim());
+        normalized.topic = returnedThemes.length ? summarizeWorksheetTopic(returnedThemes) : promptTopic;
+      }
       res.json(normalized);
     } catch (err) {
       console.error(`[${provider.name}] generate error:`, err && err.message ? err.message : err);
@@ -1451,6 +1642,8 @@ module.exports = {
   buildSystemPrompt,
   buildWorksheetPrompt,
   buildWorksheetRepairPrompt,
+  assignSectionTopics,
+  summarizeWorksheetTopic,
   buildFeedbackPrompt,
   buildFeedbackRepairPrompt,
   trimHistory,
@@ -1469,6 +1662,7 @@ module.exports = {
   CURRICULUM_MODULES,
   CURRICULUM_SUMMARY,
   WORKSHEET_SECTION_IDS,
+  WORKSHEET_SYSTEM_PROMPT,
   QUESTION_TYPES,
   FEEDBACK_VERDICTS,
   FEEDBACK_ERROR_TYPES,

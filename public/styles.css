@@ -963,6 +963,13 @@
         color: var(--gold);
       }
 
+      .section-card .section-topic {
+        margin: -8px 0 0;
+        color: var(--muted);
+        font-size: 12.5px;
+        letter-spacing: 0.02em;
+      }
+
       .section-card .section-expl {
         margin: -6px 0 0;
         color: var(--muted);

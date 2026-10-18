@@ -38,13 +38,23 @@ with mocked dependencies; see `npm test`.
 - [ ] Landing → Worksheet card and the deep link `#/worksheet` both open the generation form.
 - [ ] Choose length/listening (the subject is auto-selected) → Generate shows a loading state,
       then renders sections with French titles, French instructions and French-only prompts.
+- [ ] Each section card shows a small muted French theme subtitle under its title; the four
+      section themes are different (distinct A1 curriculum modules).
+- [ ] The fiche title is a short summary of the section themes on the auto path (for example
+      `Les Fruits · La Famille · Les Métiers`), not a single repeated module.
 - [ ] Every question prompt and every choice option is French with no English translation, gloss
       or hint (e.g. never "(What's your name?)").
+- [ ] The `Compréhension orale` section is a short authentic-style A1 document (announcement,
+      message or short dialogue). Every listening question is multiple choice with **exactly
+      three** options, and at least some require inference (place/time/person/intent/next
+      action) rather than copying the script word for word.
 - [ ] The `Compréhension écrite` section shows its reading passage **before** reveal, above that
-      section's questions (visible in the DOM, not just visually).
-- [ ] With no manual topic input, the rendered fiche title is drawn from the A1 curriculum and
-      matches the auto-selected subject. Each generation is judged independently; repeated picks
-      across generations are allowed.
+      section's questions (visible in the DOM, not just visually). Its questions mix MCQ with
+      exactly three options and short answers, and at least one answer is not stated explicitly.
+- [ ] The `Grammaire` section stays French-only (fill-in-the-blank, conjugation, agreement,
+      French-sentence reformulation), with no English→French translation.
+- [ ] The `Expression écrite` section presents a short French situation/message and asks for a
+      reply of environ 40–50 mots in French, rendered as a textarea.
 - [ ] With no text provider configured, Generate shows the server's actionable error and renders
       no worksheet (never fabricated content).
 - [ ] No "Indice" control exists anywhere in the worksheet DOM.
@@ -57,6 +67,11 @@ with mocked dependencies; see `npm test`.
 - [ ] Simulate a quota error (fill localStorage) → answers stay in memory and **Échec …** is shown;
       text is never silently dropped.
 - [ ] Leave the view (`#/chat` then back) with a pending debounce → answers were flushed, not lost.
+- [ ] **Old-fiche regression:** load a fiche saved before this change (no `topic_fr`); it renders
+      with no section subtitles and no errors, and can still be answered, revealed and sent.
+- [ ] **Legacy API compatibility (optional):** an explicit `/api/generate` request `topic` still
+      returns that label and themes the first section; later sections get distinct curriculum
+      themes.
 
 ## D. Listening (requires OPENAI_API_KEY)
 
@@ -114,7 +129,8 @@ with mocked dependencies; see `npm test`.
 - [ ] Before any feedback, the landing page `#/` shows a friendly French "Pas encore de score"
       message (`.cache-note`) inside the "Progrès" card; the layout is intact.
 - [ ] Send a fiche to the teacher from `#/worksheet`, then navigate to `#/`: the "Progrès" card
-      lists this week's fiche (topic or "Fiche" + score %) and the weekly average.
+      lists this week's fiche using the fiche's summary topic (the same `topic` shown as
+      `Fiche : …`) or "Fiche" + score %, and the weekly average.
 - [ ] Send a second (different) fiche: both appear under "Cette semaine", and the average updates
       to the mean of the two scores.
 - [ ] Re-send the same fiche (reopen it, send again): no duplicate appears — the existing entry is

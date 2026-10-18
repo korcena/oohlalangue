@@ -16,6 +16,7 @@ const sampleWorksheet = () => ({
     {
       id: 'listening',
       title_fr: 'Compréhension orale',
+      topic_fr: 'Les Fruits',
       instructions_fr: 'Écoute le dialogue.',
       audio: {
         script: 'SECRET TRANSCRIPT',
@@ -26,7 +27,8 @@ const sampleWorksheet = () => ({
         {
           id: 'l1',
           prompt: 'Que veut A ?',
-          type: 'short_text',
+          type: 'choice',
+          options: ['un café', 'un thé', 'un jus'],
           answer: 'SECRET ANSWER',
           explanation: 'SECRET EXPLANATION'
         }
@@ -35,6 +37,7 @@ const sampleWorksheet = () => ({
     {
       id: 'reading',
       title_fr: 'Compréhension écrite',
+      topic_fr: 'La Famille',
       instructions_fr: 'Lis le texte.',
       text_fr: 'TEXTE DE LECTURE',
       questions: [
@@ -57,10 +60,12 @@ test('buildRenderModel hides answers, explanations and the transcript but keeps 
   assert.ok(initial.includes('Que veut A ?'));
 
   const listening = model.sections.find((s) => s.id === 'listening');
+  assert.equal(listening.topic, 'Les Fruits');
   assert.equal(listening.instructions, 'Écoute le dialogue.');
   assert.ok(!('hint' in listening.questions[0]), 'the question model must not carry a hint key');
 
   const reading = model.sections.find((s) => s.id === 'reading');
+  assert.equal(reading.topic, 'La Famille');
   assert.equal(reading.instructions, 'Lis le texte.');
   assert.equal(reading.passage, 'TEXTE DE LECTURE');
 
@@ -95,6 +100,7 @@ test('buildRenderModel falls back to explanation_en and an empty passage for leg
   const model = buildRenderModel(legacy, { reveal: false });
   assert.equal(model.sections[0].instructions, 'Ancienne consigne.');
   assert.equal(model.sections[0].passage, '');
+  assert.equal(model.sections[0].topic, '');
   assert.ok(!('hint' in model.sections[0].questions[0]));
 });
 

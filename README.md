@@ -5,10 +5,11 @@ A small web app for practicing French. It has two paths:
 - **Chat** — a warm AI tutor. You write in French; it replies with a per-turn correction block
   (`✅ GOOD`, `🔧 FIX`, `💬 CORRECTED`) and an A1-level follow-up question drawn from a structured
   curriculum. Voice input/output uses the browser's built-in speech APIs.
-- **Worksheet (Fiche d'exercices)** — the app generates an A1 worksheet (listening, reading,
-  translation/grammar, writing), you answer it in the browser, it autosaves to `localStorage`,
-  the listening section is voiced with OpenAI TTS and cached in IndexedDB, and you can send it to
-  the teacher for feedback rendered next to each answer.
+- **Worksheet (Fiche d'exercices)** — the app generates a DELF A1-style worksheet
+  (listening, reading, grammar, writing), you answer it in the browser, it autosaves to
+  `localStorage`, the listening section is voiced with OpenAI TTS and cached in IndexedDB, and
+  you can send it to the teacher for feedback rendered next to each answer. Each section gets its
+  own A1 curriculum theme.
 
 The server is a **minimal key proxy**: it serves the static frontend and forwards AI requests to
 **Ollama Cloud** (default) or **OpenAI** for text, and **OpenAI TTS** for speech. API keys stay
@@ -178,7 +179,7 @@ cleared, so resuming never re-bills TTS.
 | Endpoint | Request | Response |
 | --- | --- | --- |
 | `POST /api/chat` | `{ messages, name, profile, skipQuestion, voiceMode }` | `{ text, raw }` |
-| `POST /api/generate` | `{ topic? (auto-selected from the A1 curriculum when omitted), level='A1', length, includeListening, name?, profile? }` | worksheet JSON (see below) |
+| `POST /api/generate` | `{ topic? (legacy label; per-section themes are auto-assigned from the A1 curriculum), level='A1', length, includeListening, name?, profile? }` | worksheet JSON (see below) |
 | `POST /api/tts` | `{ utterances:[{speaker,text}], speakers:[{name,voice}], cache_key }` | `{ segments:[{speaker,mime,base64,pause_after_ms}] }` |
 | `POST /api/feedback` | `{ worksheet, answers }` | `{ answers:[…], summary:{…} }` |
 | `GET /health` | — | provider/config booleans (no secrets) |
@@ -189,11 +190,12 @@ Structured worksheet shape (see `docs/superpowers/specs/` for the full contract)
 
 ```json
 {
-  "topic": "string",
+  "topic": "string (summary of section themes, or the explicit legacy topic)",
   "level": "A1",
   "sections": [
     {
       "id": "listening | reading | translation_grammar | writing",
+      "topic_fr": "string (required on every section, French only)",
       "title_fr": "string",
       "instructions_fr": "string",
       "text_fr": "string (reading only)",
@@ -207,11 +209,29 @@ Structured worksheet shape (see `docs/superpowers/specs/` for the full contract)
 }
 ```
 
+Each requested section gets its own **distinct** A1 curriculum theme in `topic_fr`; the server
+assigns the themes (randomly, without repetition when there are enough modules) and overwrites
+the model's value after validation. On the auto path the worksheet `topic` is a compact summary
+of the returned section themes (e.g. `Les Fruits · La Famille`, capped at 60 characters); an
+explicit request `topic` is kept as the legacy label and themes the first section.
+
+The worksheet follows DELF A1 format:
+
+- **Compréhension orale** — short authentic-style recordings; every question is `choice` with
+  exactly 3 options and tests comprehension/inference (place, time, person, intent, next action).
+- **Compréhension écrite** — a short authentic document in `text_fr`, mixing `choice` (3 options)
+  and `short_text` questions, with at least one inference question.
+- **Grammaire** — French-only grammar practice (fill-in-the-blank, conjugation, agreement,
+  French-sentence reformulation); never English→French translation.
+- **Expression écrite** — a short French situation/message and a `short_text` reply of
+  environ 40–50 mots.
+
 The `audio` block appears **only** on the `listening` section; `text_fr` (the French reading
 passage) appears **only** on the `reading` section and is required there. Every learner-facing
-string — titles, instructions, passage, prompts, options, answers and explanations — is written
-in French only. Provider output is validated server-side; invalid JSON gets one repair retry,
-then a clear `502` (never partial content).
+string — topic, titles, instructions, passage, prompts, options, answers and explanations — is
+written in French only. Provider output is validated server-side; invalid JSON gets one repair
+retry, then a clear `502` (never partial content). Old saved fiches without `topic_fr` still
+render (no subtitle) and keep working.
 
 ---
 

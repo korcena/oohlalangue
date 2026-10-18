@@ -208,6 +208,7 @@ The model name is never hardcoded into prompts; `/health` reports which provider
   "sections": [
     {
       "id": "listening|reading|translation_grammar|writing",
+      "topic_fr": "string (French theme for this section; required, distinct per section)",
       "title_fr": "string",
       "instructions_fr": "string",
       "text_fr": "string (French reading passage — reading section only, required there)",
@@ -235,9 +236,19 @@ The `audio` block is present only on the `listening` section. The `text_fr` pass
 only on the `reading` section and is required (non-empty) there. Its `script` and each question's
 `answer` are hidden from the rendered worksheet until the learner reveals/submits. The
 questions must be answerable **solely** from the audio, and the script, questions, and answer
-key are generated and validated together. Distinct `speakers` use distinct TTS voices. Every
-learner-facing string (`title_fr`, `instructions_fr`, `text_fr`, prompts, options, answers and
-explanations) is written in French only.
+key are generated and validated together. Distinct `speakers` use distinct TTS voices.
+
+The worksheet follows DELF A1 format. The server assigns a **distinct A1 curriculum module** to
+each requested section and overwrites the model's `topic_fr` after validation; on the auto path
+the worksheet-level `topic` is a compact summary of the returned section themes (an explicit
+request `topic` is a legacy label kept verbatim and used for the first section). **Compréhension
+orale** questions are always `choice` with exactly 3 options and test comprehension/inference
+rather than verbatim matching. **Compréhension écrite** uses a short authentic document with a
+mix of `choice` (3 options) and `short_text` questions, including inference. **Grammaire**
+remains French-only grammar practice (no English→French translation). **Expression écrite** is
+a `short_text` DELF A1 production task: a short French situation/message plus a reply of
+environ 40–50 mots. Every learner-facing string (`topic_fr`, `title_fr`, `instructions_fr`, `text_fr`,
+prompts, options, answers and explanations) is written in French only.
 
 `/api/tts` accepts `{ utterances, speakers, cache_key }`, where `utterances` is an ordered list
 of `{ speaker, text }` lines. Because OpenAI TTS produces a single voice per call, dialogues
