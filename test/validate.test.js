@@ -18,6 +18,20 @@ const {
   FEEDBACK_ERROR_TYPES
 } = require('../server.js');
 
+function readingQuestion(index) {
+  return {
+    id: `r${index}`,
+    prompt: 'Que vend le marchand ?',
+    type: 'short_text',
+    answer: 'des pommes',
+    explanation: 'Il vend des pommes.'
+  };
+}
+
+function readingQuestions(count = 5) {
+  return Array.from({ length: count }, (_, index) => readingQuestion(index + 1));
+}
+
 function worksheet(overrides = {}) {
   return Object.assign(
     {
@@ -30,20 +44,27 @@ function worksheet(overrides = {}) {
           topic_fr: 'La Famille',
           instructions_fr: 'Lis le texte et réponds.',
           text_fr: 'Le marchand vend des pommes au marché.',
-          questions: [
-            {
-              id: 'r1',
-              prompt: 'Que vend le marchand ?',
-              type: 'short_text',
-              answer: 'des pommes',
-              explanation: 'Il vend des pommes.'
-            }
-          ]
+          questions: readingQuestions()
         }
       ]
     },
     overrides
   );
+}
+
+function listeningQuestion(index) {
+  return {
+    id: `l${index}`,
+    prompt: 'Que demande le client ?',
+    type: 'choice',
+    options: ['une baguette', 'un café', 'un croissant'],
+    answer: 'une baguette',
+    explanation: 'Le client demande une baguette.'
+  };
+}
+
+function listeningQuestions(count = 5) {
+  return Array.from({ length: count }, (_, index) => listeningQuestion(index + 1));
 }
 
 function listening(overrides = {}) {
@@ -57,16 +78,7 @@ function listening(overrides = {}) {
       speakers: [{ name: 'Client', voice: 'alloy' }],
       cache_key: ''
     },
-    questions: [
-      {
-        id: 'l1',
-        prompt: 'Que demande le client ?',
-        type: 'choice',
-        options: ['une baguette', 'un café', 'un croissant'],
-        answer: 'une baguette',
-        explanation: 'Le client demande une baguette.'
-      }
-    ],
+    questions: listeningQuestions(),
     ...overrides
   };
 }
@@ -169,6 +181,35 @@ test('text_fr is only allowed on the reading section', () => {
 test('a valid reading section with a non-empty text_fr passes', () => {
   const result = validateWorksheet(worksheet());
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test('reading requires exactly 5 questions', () => {
+  for (const count of [4, 6]) {
+    const section = { ...worksheet().sections[0], questions: readingQuestions(count) };
+    const result = validateWorksheet(worksheet({ sections: [section] }));
+    assert.equal(result.ok, false, `${count} reading questions must fail`);
+    assert.ok(
+      result.errors.some((e) => /questions must contain exactly 5 questions for the reading section/.test(e)),
+      JSON.stringify(result.errors)
+    );
+  }
+
+  const five = validateWorksheet(worksheet());
+  assert.equal(five.ok, true, JSON.stringify(five.errors));
+});
+
+test('listening requires exactly 5 questions', () => {
+  for (const count of [4, 6]) {
+    const result = validateWorksheet(worksheet({ sections: [listening({ questions: listeningQuestions(count) })] }));
+    assert.equal(result.ok, false, `${count} listening questions must fail`);
+    assert.ok(
+      result.errors.some((e) => /questions must contain exactly 5 questions for the listening section/.test(e)),
+      JSON.stringify(result.errors)
+    );
+  }
+
+  const five = validateWorksheet(worksheet({ sections: [listening()] }));
+  assert.equal(five.ok, true, JSON.stringify(five.errors));
 });
 
 test('listening requires a non-empty script and at least one speaker', () => {

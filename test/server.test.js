@@ -428,6 +428,38 @@ const validWorksheet = {
           options: ['un café', 'un thé', 'un jus'],
           answer: 'un café',
           explanation: 'Le client commande un café.'
+        },
+        {
+          id: 'l2',
+          prompt: 'Où se passe la scène ?',
+          type: 'choice',
+          options: ['au café', 'à l’école', 'au parc'],
+          answer: 'au café',
+          explanation: 'Le client commande un café.'
+        },
+        {
+          id: 'l3',
+          prompt: 'Qui parle ?',
+          type: 'choice',
+          options: ['un client', 'un professeur', 'un médecin'],
+          answer: 'un client',
+          explanation: 'Le client passe une commande.'
+        },
+        {
+          id: 'l4',
+          prompt: 'Que fait le client ?',
+          type: 'choice',
+          options: ['il commande', 'il paie', 'il part'],
+          answer: 'il commande',
+          explanation: 'Le client commande une boisson.'
+        },
+        {
+          id: 'l5',
+          prompt: 'Quelle boisson est commandée ?',
+          type: 'choice',
+          options: ['un café', 'un thé', 'un jus'],
+          answer: 'un café',
+          explanation: 'Le client demande un café.'
         }
       ]
     },
@@ -437,7 +469,13 @@ const validWorksheet = {
       topic_fr: 'La Famille',
       instructions_fr: 'Lis et réponds.',
       text_fr: 'Paul entre dans un café et commande un café.',
-      questions: [{ id: 'r1', prompt: 'Où ?', type: 'short_text', answer: 'au café', explanation: 'Lieu.' }]
+      questions: [
+        { id: 'r1', prompt: 'Où ?', type: 'short_text', answer: 'au café', explanation: 'Lieu.' },
+        { id: 'r2', prompt: 'Qui ?', type: 'short_text', answer: 'Paul', explanation: 'Personne.' },
+        { id: 'r3', prompt: 'Quoi ?', type: 'short_text', answer: 'un café', explanation: 'Commande.' },
+        { id: 'r4', prompt: 'Que fait Paul ?', type: 'short_text', answer: 'il commande', explanation: 'Action.' },
+        { id: 'r5', prompt: 'Dans quel lieu ?', type: 'short_text', answer: 'un café', explanation: 'Lieu.' }
+      ]
     }
   ]
 };
@@ -486,16 +524,11 @@ test('POST /api/generate de-duplicates repeated question ids without a repair ca
         instructions_fr: 'Lis et réponds.',
         text_fr: 'Paul entre dans un café et commande un café.',
         questions: [
-          {
-            id: 'q1',
-            prompt: 'Où ?',
-            type: 'choice',
-            options: ['au café', 'à l’école', 'au parc'],
-            answer: 'au café',
-            explanation: 'Lieu de la scène.'
-          },
+          { id: 'q1', prompt: 'Où ?', type: 'choice', options: ['au café', 'à l’école', 'au parc'], answer: 'au café', explanation: 'Lieu de la scène.' },
           { id: 'q2', prompt: 'Qui ?', type: 'short_text', answer: 'Paul', explanation: 'Personne.' },
-          { id: 'q3', prompt: 'Quoi ?', type: 'short_text', answer: 'un café', explanation: 'Commande.' }
+          { id: 'q3', prompt: 'Quoi ?', type: 'short_text', answer: 'un café', explanation: 'Commande.' },
+          { id: 'q4', prompt: 'Que fait Paul ?', type: 'short_text', answer: 'il commande', explanation: 'Action.' },
+          { id: 'q5', prompt: 'Dans quel lieu ?', type: 'short_text', answer: 'un café', explanation: 'Lieu.' }
         ]
       },
       {
@@ -529,6 +562,8 @@ test('POST /api/generate de-duplicates repeated question ids without a repair ca
       'q1',
       'q2',
       'q3',
+      'q4',
+      'q5',
       'translation_grammar-q1',
       'translation_grammar-q2',
       'translation_grammar-q3'
@@ -828,6 +863,8 @@ test('worksheet prompts encode the DELF A1 contract', () => {
   assert.match(WORKSHEET_SYSTEM_PROMPT, /2–4 turns for a dialogue/);
   assert.match(WORKSHEET_SYSTEM_PROMPT, /single-speaker message is one turn/);
   assert.match(WORKSHEET_SYSTEM_PROMPT, /20–45 words/);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /exactly 5 multiple-choice questions/);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /exactly 5 questions/);
 
   const sectionTopics = [
     { id: 'listening', module: 'Les Fruits', focus: 'fruits', hint: 'Tu manges une pomme ?' },
@@ -854,6 +891,8 @@ test('worksheet prompts encode the DELF A1 contract', () => {
   assert.match(prompt, /single-speaker message is one turn/);
   assert.match(prompt, /20–45 words/);
   assert.match(prompt, /Narratrice/);
+  assert.match(prompt, /exactly 5 multiple-choice questions/);
+  assert.match(prompt, /exactly 5 questions/);
 });
 
 // ---------------------------------------------------------------------------

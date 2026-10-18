@@ -782,9 +782,9 @@ HARD RULES:
 - Every section MUST have a non-empty "topic_fr" written in French. It MUST match the theme assigned to that section in the user prompt. Never give two sections the same theme.
 - The "audio" block MUST appear ONLY on the "listening" section. Never put it on other sections.
 - The "text_fr" field MUST appear ONLY on the "reading" section, and it MUST be a non-empty French A1 reading passage that the section's questions are based on. Never put "text_fr" on other sections.
-- COMPRÉHENSION ORALE (DELF A1): The listening section is ONE short, natural, coherent A1 recording on the assigned theme: a short station/airport announcement, a realistic voicemail, or a short dialogue between named speakers. It MUST be 2–4 turns for a dialogue; a single-speaker message is one turn. The recording MUST be about 20–45 words in total. Use everyday A1 vocabulary and plausible content with a clear communicative purpose. Every line MUST follow logically from the previous one: NO nonsense, NO non sequiturs, and NO irrelevant or random lines. Every listening question MUST be type "choice" with EXACTLY 3 options and ONE correct answer. Listening questions MUST test comprehension or inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), NOT verbatim word-matching. Never copy a whole sentence from the script into an option. Every question must be answerable from the audio alone.
+- COMPRÉHENSION ORALE (DELF A1): The listening section MUST contain exactly 5 multiple-choice questions. The listening section is ONE short, natural, coherent A1 recording on the assigned theme: a short station/airport announcement, a realistic voicemail, or a short dialogue between named speakers. It MUST be 2–4 turns for a dialogue; a single-speaker message is one turn. The recording MUST be about 20–45 words in total. Use everyday A1 vocabulary and plausible content with a clear communicative purpose. Every line MUST follow logically from the previous one: NO nonsense, NO non sequiturs, and NO irrelevant or random lines. Every listening question MUST be type "choice" with EXACTLY 3 options and ONE correct answer. Listening questions MUST test comprehension or inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), NOT verbatim word-matching. Never copy a whole sentence from the script into an option. Every question must be answerable from the audio alone.
 - AUDIO SCRIPT FORMAT (important for voicing): For a single-speaker announcement or voicemail, write the message directly as plain French sentences with NO speaker label or prefix (never "Narratrice:", "Narrateur:", "Voix:" or similar), and list exactly ONE speaker. For a dialogue, write one line per turn, each line beginning with the speaker's exact "name" followed by a colon, e.g. "Marie: Bonjour !\\nPaul: Salut Marie !". Use only the exact speaker "name" values from "speakers", give each a distinct "voice" value ("male" or "female"), and never add a narrator line or a line spoken by anyone who is not listed in "speakers".
-- COMPRÉHENSION ÉCRITE (DELF A1): "text_fr" is a short authentic-style A1 document (courriel, SMS, panneau, annonce, publicité, menu or message) on the assigned theme. Use a mix of "choice" questions (EXACTLY 3 options) and "short_text" questions. At least one question (preferably two) MUST require inference or deduction from the text; do not make every answer a sentence copied verbatim from "text_fr". Every question must be answerable from "text_fr" alone.
+- COMPRÉHENSION ÉCRITE (DELF A1): The reading section MUST contain exactly 5 questions. "text_fr" is a short authentic-style A1 document (courriel, SMS, panneau, annonce, publicité, menu or message) on the assigned theme. Use a mix of "choice" questions (EXACTLY 3 options) and "short_text" questions. At least one question (preferably two) MUST require inference or deduction from the text; do not make every answer a sentence copied verbatim from "text_fr". Every question must be answerable from "text_fr" alone.
 - GRAMMAIRE: French-only grammar practice on the assigned theme. Use fill-in-the-blank (fill_blank), conjugation, singular/plural or masculine/feminine transforms, and reformulation of a FRENCH sentence (short_text). NEVER ask the learner to translate from English; never emit a "translation" question whose source sentence is English.
 - EXPRESSION ÉCRITE (DELF A1): The writing section MUST contain EXACTLY TWO questions, regardless of the requested worksheet length:
   1) ONE "form" question: the "prompt" is a short French situation asking the learner to complete a real-life form (fiche d'inscription à l'hôtel, formulaire d'inscription à un cours, etc.). It MUST have a non-empty "fields" array of 5–8 objects, each with ONLY a non-empty French "label_fr" (for example "Nom", "Prénom", "Nationalité", "Date d'arrivée", "Date de départ"). Its "answer" is a French model of the completed form as one readable string. The prompt, labels, answer and explanation are French only.
@@ -801,9 +801,9 @@ HARD RULES:
 
 function lengthToCounts(length) {
   const key = String(length || 'medium').toLowerCase();
-  if (key === 'short') return { reading: 3, translation_grammar: 3, writing: 2, listening: 2 };
-  if (key === 'long') return { reading: 6, translation_grammar: 6, writing: 2, listening: 4 };
-  return { reading: 4, translation_grammar: 4, writing: 2, listening: 3 };
+  if (key === 'short') return { reading: 5, translation_grammar: 3, writing: 2, listening: 5 };
+  if (key === 'long') return { reading: 5, translation_grammar: 6, writing: 2, listening: 5 };
+  return { reading: 5, translation_grammar: 4, writing: 2, listening: 5 };
 }
 
 function buildWorksheetPrompt({
@@ -850,11 +850,11 @@ function buildWorksheetPrompt({
   lines.push('Include these sections, in this order:');
   if (includeListening) {
     lines.push(
-      `- listening (Compréhension orale) — theme: "${themeFor('listening')}"${focusFor('listening')}.${hintFor('listening')} A short, natural, coherent A1 recording on this theme: a station/airport announcement, a realistic voicemail, or a short dialogue between named speakers. It MUST be 2–4 turns for a dialogue; a single-speaker message is one turn. The recording MUST be about 20–45 words in total. Use everyday A1 vocabulary and plausible content with a clear communicative purpose; every line MUST follow logically from the previous one — no nonsense, no non sequiturs, no irrelevant lines. For a single speaker, write the message directly with no "Narratrice:"/"Narrateur:" prefix and list exactly one speaker; for a dialogue, use "Name: ..." lines with the exact speaker names. With ${counts.listening} multiple-choice questions. Every question MUST be type "choice" with exactly 3 options and one correct answer. Test comprehension/inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), not verbatim word-matching; never copy a sentence from the script into an option.`
+      `- listening (Compréhension orale) — theme: "${themeFor('listening')}"${focusFor('listening')}.${hintFor('listening')} A short, natural, coherent A1 recording on this theme: a station/airport announcement, a realistic voicemail, or a short dialogue between named speakers. It MUST be 2–4 turns for a dialogue; a single-speaker message is one turn. The recording MUST be about 20–45 words in total. Use everyday A1 vocabulary and plausible content with a clear communicative purpose; every line MUST follow logically from the previous one — no nonsense, no non sequiturs, no irrelevant lines. For a single speaker, write the message directly with no "Narratrice:"/"Narrateur:" prefix and list exactly one speaker; for a dialogue, use "Name: ..." lines with the exact speaker names. With exactly ${counts.listening} multiple-choice questions. Every question MUST be type "choice" with exactly 3 options and one correct answer. Test comprehension/inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), not verbatim word-matching; never copy a sentence from the script into an option.`
     );
   }
   lines.push(
-    `- reading (Compréhension écrite) — theme: "${themeFor('reading')}"${focusFor('reading')}. A short authentic-style A1 document (courriel, SMS, panneau, annonce, publicité, menu or message) in "text_fr" on this theme, with ${counts.reading} questions: a mix of "choice" questions (exactly 3 options) and "short_text" questions. At least one question (preferably two) must require inference from the text; do not make every answer a verbatim sentence from "text_fr".`
+    `- reading (Compréhension écrite) — theme: "${themeFor('reading')}"${focusFor('reading')}. A short authentic-style A1 document (courriel, SMS, panneau, annonce, publicité, menu or message) in "text_fr" on this theme, with exactly ${counts.reading} questions: a mix of "choice" questions (exactly 3 options) and "short_text" questions. At least one question (preferably two) must require inference from the text; do not make every answer a verbatim sentence from "text_fr".`
   );
   lines.push(
     `- translation_grammar (Grammaire) — theme: "${themeFor('translation_grammar')}"${focusFor('translation_grammar')}. ${counts.translation_grammar} French-only grammar exercises on this theme (fill in the blank, conjugation, singular/plural and masculine/feminine transforms, French sentence reformulation). Never English→French translation.`
@@ -993,6 +993,12 @@ function validateWorksheet(value) {
     if (!Array.isArray(section.questions) || section.questions.length === 0) {
       errors.push(`${where}.questions must be a non-empty array`);
       return;
+    }
+    if (isListening && section.questions.length !== 5) {
+      errors.push(`${where}.questions must contain exactly 5 questions for the listening section`);
+    }
+    if (isReading && section.questions.length !== 5) {
+      errors.push(`${where}.questions must contain exactly 5 questions for the reading section`);
     }
     section.questions.forEach((q, qi) => {
       const qWhere = `${where}.questions[${qi}]`;
