@@ -1,6 +1,9 @@
 // Landing view: choose Chat or Worksheet.
 
+import { buildScoreSeries } from '../lib/chart.js';
 import { historyByWeek, readHistory, thisWeek } from '../lib/scores.js';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function ficheCount(count) {
   return `${count} fiche${count > 1 ? 's' : ''}`;
@@ -8,6 +11,90 @@ function ficheCount(count) {
 
 function weekLabel(weekStart) {
   return new Date(weekStart).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+}
+
+function svgElement(tag, className) {
+  const node = document.createElementNS(SVG_NS, tag);
+  if (className) node.setAttribute('class', className);
+  return node;
+}
+
+// French accessible summary of the trend. Only numbers, week dates and fiche
+// counts are added; no learner/model-derived text.
+function chartAriaLabel(series) {
+  const points = series.points;
+  if (!points.length) return 'Évolution du score moyen hebdomadaire.';
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (points.length === 1) {
+    return `Score moyen de ${first.average} % pour la semaine du ${weekLabel(first.weekStart)}.`;
+  }
+  const delta = last.average - first.average;
+  const trend = Math.abs(delta) <= 2 ? 'stable' : delta > 2 ? 'en progression' : 'en baisse';
+  return (
+    `Évolution du score moyen hebdomadaire, ${trend} : ` +
+    `de ${first.average} % (semaine du ${weekLabel(first.weekStart)}) ` +
+    `à ${last.average} % (semaine du ${weekLabel(last.weekStart)}), ` +
+    `sur ${points.length} semaines avec des fiches.`
+  );
+}
+
+// Inline SVG built exclusively with createElementNS/setAttribute/textContent.
+// The exact 12-week list below the chart stays the accessible fallback.
+function buildScoreChart(series) {
+  const svg = svgElement('svg', 'score-chart');
+  svg.setAttribute('viewBox', `0 0 ${series.width} ${series.height}`);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', chartAriaLabel(series));
+  svg.setAttribute('focusable', 'false');
+
+  const grid = svgElement('g', 'score-chart-grid');
+  grid.setAttribute('aria-hidden', 'true');
+  const labels = svgElement('g', 'score-chart-labels');
+  labels.setAttribute('aria-hidden', 'true');
+
+  for (const gridline of series.gridlines) {
+    const line = svgElement('line', 'score-chart-grid-line');
+    line.setAttribute('x1', series.plot.left);
+    line.setAttribute('x2', series.plot.right);
+    line.setAttribute('y1', gridline.y);
+    line.setAttribute('y2', gridline.y);
+    grid.appendChild(line);
+
+    const label = svgElement('text', 'score-chart-label');
+    label.setAttribute('x', series.plot.left - 6);
+    label.setAttribute('y', gridline.y);
+    label.setAttribute('text-anchor', 'end');
+    label.setAttribute('dominant-baseline', 'middle');
+    label.textContent = String(gridline.value);
+    labels.appendChild(label);
+  }
+
+  svg.append(grid, labels);
+
+  if (series.polyline) {
+    const polyline = svgElement('polyline', 'score-chart-line');
+    polyline.setAttribute('points', series.polyline);
+    polyline.setAttribute('fill', 'none');
+    svg.appendChild(polyline);
+  }
+
+  const dots = svgElement('g', 'score-chart-dots');
+  for (const point of series.points) {
+    const dot = svgElement('circle', 'score-chart-dot');
+    dot.setAttribute('cx', point.x);
+    dot.setAttribute('cy', point.y);
+    dot.setAttribute('r', '3.5');
+    const title = svgElement('title');
+    title.textContent = `Semaine du ${weekLabel(point.weekStart)} — ${point.average} % (${ficheCount(
+      point.count
+    )})`;
+    dot.appendChild(title);
+    dots.appendChild(dot);
+  }
+  svg.appendChild(dots);
+
+  return svg;
 }
 
 // Build the "Progrès" panel from the score history. Never uses innerHTML:
@@ -59,11 +146,21 @@ function buildProgressPanel(history, now) {
   }
 
   const historyHeading = document.createElement('h4');
+
+  // One bucket list for both the chart and the exact list below it.
+  const buckets = historyByWeek(history, now);
+  const series = buildScoreSeries(buckets);
+  if (!series.empty) {
+    const evolutionHeading = document.createElement('h4');
+    evolutionHeading.textContent = 'Évolution';
+    panel.append(evolutionHeading, buildScoreChart(series));
+  }
+
   historyHeading.textContent = '12 dernières semaines';
   panel.appendChild(historyHeading);
 
   const weekList = document.createElement('ul');
-  for (const bucket of historyByWeek(history, now)) {
+  for (const bucket of buckets) {
     const item = document.createElement('li');
     item.textContent = `Semaine du ${weekLabel(bucket.weekStart)} — ${bucket.average} % (${ficheCount(
       bucket.count

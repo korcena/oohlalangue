@@ -841,6 +841,16 @@
         align-items: center;
       }
 
+      .worksheet-actions[hidden] {
+        display: none;
+      }
+
+      .worksheet-actions-bottom {
+        margin-top: 22px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+
       .btn {
         font-family: inherit;
         font-size: 13.5px;
@@ -1231,6 +1241,39 @@
         margin: 0;
         padding-left: 20px;
         line-height: 1.55;
+      }
+
+      .score-chart {
+        display: block;
+        width: 100%;
+        height: auto;
+        overflow: visible;
+        margin: 2px 0 6px;
+      }
+
+      .score-chart .score-chart-grid-line {
+        stroke: var(--border);
+        stroke-width: 1;
+      }
+
+      .score-chart .score-chart-label {
+        fill: var(--muted);
+        font-family: inherit;
+        font-size: 10px;
+      }
+
+      .score-chart .score-chart-line {
+        fill: none;
+        stroke: var(--gold);
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .score-chart .score-chart-dot {
+        fill: var(--gold);
+        stroke: var(--panel);
+        stroke-width: 2;
       }
 
       .notice {

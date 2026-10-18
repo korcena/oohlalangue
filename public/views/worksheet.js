@@ -95,7 +95,10 @@ export function mount(container, ctx) {
   const body = el('div');
   body.style.display = 'contents';
 
-  wrap.append(head, body);
+  const actionsBottom = el('div', 'worksheet-actions worksheet-actions-bottom');
+  actionsBottom.hidden = true;
+
+  wrap.append(head, body, actionsBottom);
   container.appendChild(wrap);
 
   const generation = buildGenerationForm();
@@ -275,10 +278,13 @@ export function mount(container, ctx) {
 
   function renderGeneration(errorMessage) {
     body.textContent = '';
-    // Reset the header: no worksheet is loaded, so drop the per-worksheet
-    // action buttons and title/meta from any previous worksheet.
+    // Reset both action containers: no worksheet is loaded, so drop the
+    // per-worksheet buttons and quota note from any previous worksheet.
     actions.querySelectorAll('.btn-ws-action').forEach((n) => n.remove());
     actions.querySelectorAll('.worksheet-quota-note').forEach((n) => n.remove());
+    actionsBottom.querySelectorAll('.btn-ws-action').forEach((n) => n.remove());
+    actionsBottom.textContent = '';
+    actionsBottom.hidden = true;
     title.textContent = 'Fiche d’exercices';
     meta.textContent = '';
     if (errorMessage) {
@@ -311,9 +317,11 @@ export function mount(container, ctx) {
     title.textContent = state.worksheet.topic ? `Fiche : ${state.worksheet.topic}` : 'Fiche d’exercices';
     meta.textContent = `${state.worksheet.level || 'A1'} · ${state.worksheet.sections.length} sections`;
 
-    // Header actions: reveal toggle, send, new worksheet.
+    // Header actions: new worksheet. The reveal toggle and send button live in
+    // the bottom action bar, after all worksheet content.
     actions.querySelectorAll('.btn-ws-action').forEach((n) => n.remove());
     actions.querySelectorAll('.worksheet-quota-note').forEach((n) => n.remove());
+    actionsBottom.querySelectorAll('.btn-ws-action').forEach((n) => n.remove());
     const quotaNow = Date.now();
     const canStartNew = canGenerate(storage.getQuota(), quotaNow);
 
@@ -339,10 +347,12 @@ export function mount(container, ctx) {
     newBtn.disabled = !canStartNew;
     newBtn.addEventListener('click', () => newWorksheet());
 
-    actions.append(revealBtn, sendBtn, newBtn);
+    actions.append(newBtn);
     if (!canStartNew) {
       actions.appendChild(el('div', 'notice worksheet-quota-note', quotaMessage(quotaNow)));
     }
+    actionsBottom.append(revealBtn, sendBtn);
+    actionsBottom.hidden = false;
 
     const model = buildRenderModel(state.worksheet, { reveal: state.revealed });
     const feedbackRows = state.feedback ? feedbackToUi(state.feedback, state.worksheet) : [];
