@@ -1022,6 +1022,25 @@
         border-color: rgba(245, 200, 66, 0.5);
       }
 
+      .form-fields {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .form-field {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .form-field-label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+      }
+
       .choice-list {
         display: flex;
         flex-direction: column;

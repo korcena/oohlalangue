@@ -739,7 +739,7 @@ function selectProvider(env = process.env, deps = {}) {
 // ---------------------------------------------------------------------------
 
 const WORKSHEET_SECTION_IDS = ['listening', 'reading', 'translation_grammar', 'writing'];
-const QUESTION_TYPES = ['short_text', 'choice', 'fill_blank', 'translation'];
+const QUESTION_TYPES = ['short_text', 'choice', 'fill_blank', 'translation', 'form'];
 const FEEDBACK_VERDICTS = ['correct', 'mistake', 'alternative'];
 const FEEDBACK_ERROR_TYPES = ['error', 'style', 'alternative'];
 
@@ -766,8 +766,9 @@ The object MUST match this shape exactly:
         {
           "id": "unique-string-id",
           "prompt": "La question, en français uniquement — aucune traduction ni glose en anglais",
-          "type": "short_text | choice | fill_blank | translation",
+          "type": "short_text | choice | fill_blank | translation | form",
           "options": ["only for choice questions"],
+          "fields": [{ "label_fr": "Libellé du champ, en français uniquement" }],
           "answer": "the expected answer (hidden until the learner reveals it)",
           "explanation": "Explication de la réponse, en français uniquement"
         }
@@ -781,12 +782,16 @@ HARD RULES:
 - Every section MUST have a non-empty "topic_fr" written in French. It MUST match the theme assigned to that section in the user prompt. Never give two sections the same theme.
 - The "audio" block MUST appear ONLY on the "listening" section. Never put it on other sections.
 - The "text_fr" field MUST appear ONLY on the "reading" section, and it MUST be a non-empty French A1 reading passage that the section's questions are based on. Never put "text_fr" on other sections.
-- COMPRÉHENSION ORALE (DELF A1): The listening section is a short authentic-style A1 recording — 1–2 short messages/announcements or one short dialogue — on the assigned theme. Every listening question MUST be type "choice" with EXACTLY 3 options and ONE correct answer. Listening questions MUST test comprehension or inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), NOT verbatim word-matching. Never copy a whole sentence from the script into an option. Every question must be answerable from the audio alone.
-- DIALOGUE FORMAT (important for voicing): if the script has more than one speaker, write it as one line per turn, each line beginning with the speaker's name followed by a colon, e.g. "Marie: Bonjour !\\nPaul: Salut Marie !". Use exactly the speaker "name" values from "speakers", and give each a distinct "voice" value ("male" or "female") so the turns are voiced separately. For a single-speaker narration, write plain sentences and list one speaker.
+- COMPRÉHENSION ORALE (DELF A1): The listening section is ONE short, natural, coherent A1 recording on the assigned theme: a short station/airport announcement, a realistic voicemail, or a short dialogue between named speakers. It MUST be 2–4 turns for a dialogue; a single-speaker message is one turn. The recording MUST be about 20–45 words in total. Use everyday A1 vocabulary and plausible content with a clear communicative purpose. Every line MUST follow logically from the previous one: NO nonsense, NO non sequiturs, and NO irrelevant or random lines. Every listening question MUST be type "choice" with EXACTLY 3 options and ONE correct answer. Listening questions MUST test comprehension or inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), NOT verbatim word-matching. Never copy a whole sentence from the script into an option. Every question must be answerable from the audio alone.
+- AUDIO SCRIPT FORMAT (important for voicing): For a single-speaker announcement or voicemail, write the message directly as plain French sentences with NO speaker label or prefix (never "Narratrice:", "Narrateur:", "Voix:" or similar), and list exactly ONE speaker. For a dialogue, write one line per turn, each line beginning with the speaker's exact "name" followed by a colon, e.g. "Marie: Bonjour !\\nPaul: Salut Marie !". Use only the exact speaker "name" values from "speakers", give each a distinct "voice" value ("male" or "female"), and never add a narrator line or a line spoken by anyone who is not listed in "speakers".
 - COMPRÉHENSION ÉCRITE (DELF A1): "text_fr" is a short authentic-style A1 document (courriel, SMS, panneau, annonce, publicité, menu or message) on the assigned theme. Use a mix of "choice" questions (EXACTLY 3 options) and "short_text" questions. At least one question (preferably two) MUST require inference or deduction from the text; do not make every answer a sentence copied verbatim from "text_fr". Every question must be answerable from "text_fr" alone.
 - GRAMMAIRE: French-only grammar practice on the assigned theme. Use fill-in-the-blank (fill_blank), conjugation, singular/plural or masculine/feminine transforms, and reformulation of a FRENCH sentence (short_text). NEVER ask the learner to translate from English; never emit a "translation" question whose source sentence is English.
-- EXPRESSION ÉCRITE (DELF A1): Each writing question MUST be type "short_text". Its "prompt" MUST present a short French situation or message that the learner must understand (for example an invitation, an SMS, an announcement), then ask the learner to respond in French in environ 40–50 mots. The situation and the task are both written in French only. Never ask for a translation.
-- Every question MUST have: id, prompt, type, answer, explanation. "options" is REQUIRED when type is "choice" and must be omitted otherwise.
+- EXPRESSION ÉCRITE (DELF A1): The writing section MUST contain EXACTLY TWO questions, regardless of the requested worksheet length:
+  1) ONE "form" question: the "prompt" is a short French situation asking the learner to complete a real-life form (fiche d'inscription à l'hôtel, formulaire d'inscription à un cours, etc.). It MUST have a non-empty "fields" array of 5–8 objects, each with ONLY a non-empty French "label_fr" (for example "Nom", "Prénom", "Nationalité", "Date d'arrivée", "Date de départ"). Its "answer" is a French model of the completed form as one readable string. The prompt, labels, answer and explanation are French only.
+  2) ONE "short_text" question: the "prompt" presents a short French situation or message that the learner must understand (invitation, SMS, announcement, etc.), then asks the learner to reply in French in environ 40–50 mots. The situation and the task are both written in French only.
+  Never ask for a translation. Do not add any other writing question.
+- Every question MUST have: id, prompt, type, answer, explanation. "options" is REQUIRED when type is "choice" and MUST be omitted otherwise. "fields" is REQUIRED when type is "form" and MUST be omitted otherwise.
+- The "fields" array MUST appear ONLY on a "form" question, and "form" is allowed ONLY in the writing section.
 - "answer" is the model answer / answer key. It is delivered to the client by design but hidden in the UI until reveal.
 - Keep vocabulary and grammar at A1 level. Use short sentences.
 - EVERY learner-facing string MUST be written in French only: "topic_fr", "title_fr", "instructions_fr", "text_fr", "prompt", "options", "answer" and "explanation". Never write English — not even in parentheses, not as a translation or gloss.
@@ -795,9 +800,9 @@ HARD RULES:
 
 function lengthToCounts(length) {
   const key = String(length || 'medium').toLowerCase();
-  if (key === 'short') return { reading: 3, translation_grammar: 3, writing: 1, listening: 2 };
+  if (key === 'short') return { reading: 3, translation_grammar: 3, writing: 2, listening: 2 };
   if (key === 'long') return { reading: 6, translation_grammar: 6, writing: 2, listening: 4 };
-  return { reading: 4, translation_grammar: 4, writing: 1, listening: 3 };
+  return { reading: 4, translation_grammar: 4, writing: 2, listening: 3 };
 }
 
 function buildWorksheetPrompt({
@@ -844,7 +849,7 @@ function buildWorksheetPrompt({
   lines.push('Include these sections, in this order:');
   if (includeListening) {
     lines.push(
-      `- listening (Compréhension orale) — theme: "${themeFor('listening')}"${focusFor('listening')}.${hintFor('listening')} A short authentic-style A1 recording (1–2 short messages/announcements or one short dialogue) on this theme, with ${counts.listening} multiple-choice questions. Every question MUST be type "choice" with exactly 3 options and one correct answer. Test comprehension/inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), not verbatim word-matching; never copy a sentence from the script into an option.`
+      `- listening (Compréhension orale) — theme: "${themeFor('listening')}"${focusFor('listening')}.${hintFor('listening')} A short, natural, coherent A1 recording on this theme: a station/airport announcement, a realistic voicemail, or a short dialogue between named speakers. It MUST be 2–4 turns for a dialogue; a single-speaker message is one turn. The recording MUST be about 20–45 words in total. Use everyday A1 vocabulary and plausible content with a clear communicative purpose; every line MUST follow logically from the previous one — no nonsense, no non sequiturs, no irrelevant lines. For a single speaker, write the message directly with no "Narratrice:"/"Narrateur:" prefix and list exactly one speaker; for a dialogue, use "Name: ..." lines with the exact speaker names. With ${counts.listening} multiple-choice questions. Every question MUST be type "choice" with exactly 3 options and one correct answer. Test comprehension/inference (où ? quand ? qui ? pourquoi ? que veut la personne ? que va-t-elle faire ?), not verbatim word-matching; never copy a sentence from the script into an option.`
     );
   }
   lines.push(
@@ -854,7 +859,10 @@ function buildWorksheetPrompt({
     `- translation_grammar (Grammaire) — theme: "${themeFor('translation_grammar')}"${focusFor('translation_grammar')}. ${counts.translation_grammar} French-only grammar exercises on this theme (fill in the blank, conjugation, singular/plural and masculine/feminine transforms, French sentence reformulation). Never English→French translation.`
   );
   lines.push(
-    `- writing (Expression écrite) — theme: "${themeFor('writing')}"${focusFor('writing')}. ${counts.writing} DELF A1 production task(s). In each question prompt, write a short French situation/message the learner must understand (invitation, SMS, announcement, etc.) and ask them to reply in French in environ 40–50 mots. Use type "short_text" and a French-only prompt.`
+    `- writing (Expression écrite) — theme: "${themeFor('writing')}"${focusFor('writing')}. Exactly TWO DELF A1 production questions, regardless of worksheet length:
+  1) ONE type "form" question: a short French prompt asking the learner to complete an authentic form (fiche d'inscription à l'hôtel, formulaire d'inscription à un cours, etc.). Provide 5–8 "fields", each an object with a non-empty French "label_fr" (for example "Nom", "Prénom", "Nationalité", "Date d'arrivée", "Date de départ"). The "answer" is a French model of the completed form as one readable string.
+  2) ONE type "short_text" question: a short French situation/message the learner must understand (invitation, SMS, announcement, etc.), asking for a reply in French in environ 40–50 mots.
+  Both prompts, field labels, answers and explanations are French only. Never ask for a translation. Omit "fields" on the short_text question.`
   );
   lines.push('');
   lines.push('Every section MUST include "topic_fr" set to the theme assigned above.');
@@ -963,8 +971,28 @@ function validateWorksheet(value) {
       if (isListening && q.type === 'choice' && Array.isArray(q.options) && q.options.length !== 3) {
         errors.push(`${qWhere}.options must contain exactly 3 options for the listening section`);
       }
-      if (section.id === 'writing' && q.type !== 'short_text') {
-        errors.push(`${qWhere}.type must be "short_text" for the writing section`);
+      if (q.type === 'form' && section.id !== 'writing') {
+        errors.push(`${qWhere}.type "form" is only allowed in the writing section`);
+      }
+      if (section.id === 'writing' && q.type !== 'short_text' && q.type !== 'form') {
+        errors.push(`${qWhere}.type must be "short_text" or "form" for the writing section`);
+      }
+      if (q.type === 'form') {
+        if (!Array.isArray(q.fields) || q.fields.length === 0) {
+          errors.push(`${qWhere}.fields must be a non-empty array for form questions`);
+        } else {
+          q.fields.forEach((field, fi) => {
+            if (!field || typeof field !== 'object' || Array.isArray(field)) {
+              errors.push(`${qWhere}.fields[${fi}] must be an object`);
+              return;
+            }
+            if (typeof field.label_fr !== 'string' || !field.label_fr.trim()) {
+              errors.push(`${qWhere}.fields[${fi}].label_fr must be a non-empty string`);
+            }
+          });
+        }
+      } else if (Object.prototype.hasOwnProperty.call(q, 'fields')) {
+        errors.push(`${qWhere}.fields must only appear on form questions`);
       }
       if (q.type === 'choice') {
         if (!Array.isArray(q.options) || q.options.length === 0) {
@@ -976,6 +1004,21 @@ function validateWorksheet(value) {
       if (typeof q.answer !== 'string' || !q.answer.trim()) errors.push(`${qWhere}.answer must be a non-empty string`);
       if (typeof q.explanation !== 'string' || !q.explanation.trim()) errors.push(`${qWhere}.explanation must be a non-empty string`);
     });
+
+    if (section.id === 'writing' && Array.isArray(section.questions)) {
+      const questions = section.questions;
+      const formCount = questions.filter(
+        (q) => q && typeof q === 'object' && !Array.isArray(q) && q.type === 'form'
+      ).length;
+      const hasShortText = questions.some(
+        (q) => q && typeof q === 'object' && !Array.isArray(q) && q.type === 'short_text'
+      );
+      if (formCount !== 1 || !hasShortText) {
+        errors.push(
+          `${where}.questions must contain exactly one "form" question and at least one "short_text" question for the writing section`
+        );
+      }
+    }
   });
 
   return { ok: errors.length === 0, errors };
@@ -1021,6 +1064,37 @@ function normalizeWorksheet(value) {
 const FEEDBACK_SYSTEM_PROMPT =
   'You are a warm A1 French teacher giving concise, encouraging corrections on a practice worksheet. Write every correction, explanation and summary in French only. Reply with strict JSON only.';
 
+// Serialize a learner answer for prompts and the feedback response. Form
+// answers are plain objects keyed by French field label; they must never reach
+// the model or the client as `[object Object]`. Empty fields are omitted, so an
+// all-empty form serializes to '' and is treated as a blank answer by scoring.
+function formatAnswerForPrompt(question, value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return String(value == null ? '' : value);
+  }
+  const q = question && typeof question === 'object' ? question : {};
+  const labels = Array.isArray(q.fields)
+    ? q.fields
+        .map((field) => (field && typeof field.label_fr === 'string' && field.label_fr.trim() ? field.label_fr : ''))
+        .filter(Boolean)
+    : [];
+  const entries = labels.length
+    ? labels.map((label) => [
+        label,
+        Object.prototype.hasOwnProperty.call(value, label) ? value[label] : undefined
+      ])
+    : Object.entries(value);
+  const parts = [];
+  for (const [label, raw] of entries) {
+    if (typeof raw !== 'string') continue;
+    const cleanLabel = String(label == null ? '' : label).replace(/\s+/g, ' ').trim();
+    const text = raw.replace(/\s+/g, ' ').trim();
+    if (!cleanLabel || !text) continue;
+    parts.push(`${cleanLabel} : ${text}`);
+  }
+  return parts.join(' ; ');
+}
+
 function buildFeedbackPrompt(worksheet, answersMap) {
   const sections = (worksheet && worksheet.sections) || [];
   const lines = [];
@@ -1036,7 +1110,8 @@ function buildFeedbackPrompt(worksheet, answersMap) {
       lines.push(`Reading text (use it to judge the reading answers): ${section.text_fr}`);
     }
     for (const q of section.questions || []) {
-      const original = Object.prototype.hasOwnProperty.call(answersMap, q.id) ? answersMap[q.id] : '';
+      const raw = Object.prototype.hasOwnProperty.call(answersMap, q.id) ? answersMap[q.id] : '';
+      const original = formatAnswerForPrompt(q, raw);
       lines.push(`- question_id: ${q.id}`);
       lines.push(`  prompt: ${q.prompt}`);
       lines.push(`  expected answer: ${q.answer}`);
@@ -1051,7 +1126,7 @@ function buildFeedbackPrompt(worksheet, answersMap) {
   lines.push('  ],');
   lines.push('  "summary": { "strengths": ["..."], "recurring_mistakes": ["..."], "priorities": ["..."], "follow_up": "string" }');
   lines.push('}');
-  lines.push('Rules: verdict must be one of correct|mistake|alternative. error_type must be one of error|style|alternative. Copy each learner answer into "original" exactly as given. Write every correction, explanation and summary item in French only — never English. Be encouraging and concise.');
+  lines.push('Rules: verdict must be one of correct|mistake|alternative. error_type must be one of error|style|alternative. Copy each learner answer into "original" exactly as given. For a form question, the learner answer is already formatted as "Label : valeur ; Label : valeur". Write every correction, explanation and summary item in French only — never English. Be encouraging and concise.');
   return lines.join('\n');
 }
 
@@ -1103,14 +1178,18 @@ function validateFeedback(value) {
 function normalizeAnswers(answers) {
   const map = {};
   if (!answers) return map;
+  const preserve = (value) =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : String(value == null ? '' : value);
   if (Array.isArray(answers)) {
     for (const item of answers) {
-      if (item && typeof item.question_id === 'string') map[item.question_id] = String(item.answer == null ? '' : item.answer);
+      if (item && typeof item.question_id === 'string') map[item.question_id] = preserve(item.answer);
     }
     return map;
   }
   if (typeof answers === 'object') {
-    for (const [k, v] of Object.entries(answers)) map[k] = String(v == null ? '' : v);
+    for (const [k, v] of Object.entries(answers)) map[k] = preserve(v);
   }
   return map;
 }
@@ -1435,10 +1514,19 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
         }
       }
 
-      // Never let the model rewrite the learner's original answer.
+      // Never let the model rewrite the learner's original answer. Form answers
+      // are serialized here so `original` is always a readable string.
+      const questionById = new Map();
+      for (const section of worksheet.sections) {
+        for (const q of (section && Array.isArray(section.questions) ? section.questions : [])) {
+          if (q && typeof q.id === 'string') questionById.set(q.id, q);
+        }
+      }
       parsed.answers = parsed.answers.map((a) => {
         if (Object.prototype.hasOwnProperty.call(answersMap, a.question_id)) {
-          return Object.assign({}, a, { original: answersMap[a.question_id] });
+          return Object.assign({}, a, {
+            original: formatAnswerForPrompt(questionById.get(a.question_id), answersMap[a.question_id])
+          });
         }
         return a;
       });
@@ -1646,6 +1734,7 @@ module.exports = {
   summarizeWorksheetTopic,
   buildFeedbackPrompt,
   buildFeedbackRepairPrompt,
+  formatAnswerForPrompt,
   trimHistory,
   sanitizeName,
   sanitizeFact,

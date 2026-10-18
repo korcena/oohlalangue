@@ -53,8 +53,21 @@ with mocked dependencies; see `npm test`.
       exactly three options and short answers, and at least one answer is not stated explicitly.
 - [ ] The `Grammaire` section stays French-only (fill-in-the-blank, conjugation, agreement,
       French-sentence reformulation), with no English→French translation.
-- [ ] The `Expression écrite` section presents a short French situation/message and asks for a
-      reply of environ 40–50 mots in French, rendered as a textarea.
+- [ ] The `Expression écrite` section contains exactly two tasks: a **form** with 5–8 visible
+      French labels rendered as single-line inputs, and a message task rendered as a textarea
+      asking for a reply of environ 40–50 mots in French.
+- [ ] The form labels are rendered as text (inspect the DOM: no HTML injection; `textContent`).
+- [ ] Type into several form fields; the save-state shows **Enregistrement… → Enregistré**.
+- [ ] Refresh: every form field value restores, the message textarea restores, and no
+      `/api/generate` call is made.
+- [ ] Leave/re-enter the view (`#/chat` then back) with a pending debounce: form values are
+      flushed, not lost.
+- [ ] Reveal shows the model form answer string (for example `Nom : … ; Prénom : …`) after the
+      form and after the message.
+- [ ] Send to teacher: feedback shows a readable `Nom : … ; Prénom : …` original for the form,
+      never `[object Object]`.
+- [ ] Submit an all-empty form with other answers filled: the form does not count in the score.
+- [ ] Fill at least one form field: the form counts as one graded question.
 - [ ] With no text provider configured, Generate shows the server's actionable error and renders
       no worksheet (never fabricated content).
 - [ ] No "Indice" control exists anywhere in the worksheet DOM.
@@ -67,14 +80,22 @@ with mocked dependencies; see `npm test`.
 - [ ] Simulate a quota error (fill localStorage) → answers stay in memory and **Échec …** is shown;
       text is never silently dropped.
 - [ ] Leave the view (`#/chat` then back) with a pending debounce → answers were flushed, not lost.
-- [ ] **Old-fiche regression:** load a fiche saved before this change (no `topic_fr`); it renders
-      with no section subtitles and no errors, and can still be answered, revealed and sent.
+- [ ] **Old-fiche regression:** load a fiche saved before this change (no `topic_fr`, no `form`
+      and no `fields`); it renders, autosaves, reveals, sends feedback and records a score
+      without errors.
 - [ ] **Legacy API compatibility (optional):** an explicit `/api/generate` request `topic` still
       returns that label and themes the first section; later sections get distinct curriculum
       themes.
 
 ## D. Listening (requires OPENAI_API_KEY)
 
+- [ ] The listening script is one short, coherent A1 recording: a station/airport announcement,
+      a realistic voicemail, or a short dialogue between named speakers (2–4 turns, about
+      20–45 words). Every line follows logically from the previous one; no nonsense,
+      non-sequiturs or irrelevant lines.
+- [ ] A single-speaker script has no `Narratrice:`/`Narrateur:`/`Voix:` prefix and lists exactly
+      one speaker; a dialogue uses `Name: …` lines with the exact listed speaker names and no
+      narrator line.
 - [ ] First play calls `/api/tts`; segments play in order with pauses between distinct speakers.
 - [ ] Replay and refresh-play do **not** re-call `/api/tts` (check the network tab; cache hit).
 - [ ] Slow playback works and toggles the button label to **activé**.

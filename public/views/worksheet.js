@@ -429,6 +429,30 @@ export function mount(container, ctx) {
         list.appendChild(label);
       }
       block.appendChild(list);
+    } else if (controlKind === 'form' && question.fields.length) {
+      const saved =
+        savedValue && typeof savedValue === 'object' && !Array.isArray(savedValue) ? savedValue : {};
+      const fieldsWrap = el('div', 'form-fields');
+      for (const field of question.fields) {
+        const label = field.label;
+        const fieldWrap = el('label', 'form-field');
+        fieldWrap.appendChild(el('span', 'form-field-label', label));
+        const input = el('input', 'answer-input');
+        input.type = 'text';
+        const savedField = Object.prototype.hasOwnProperty.call(saved, label) ? saved[label] : '';
+        input.value = typeof savedField === 'string' ? savedField : '';
+        input.setAttribute('aria-label', `${label} — question ${answerKey}`);
+        input.addEventListener('input', () => {
+          const current = state.answersByQuestionId[answerKey];
+          const base =
+            current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+          state.answersByQuestionId[answerKey] = { ...base, [label]: input.value };
+          scheduleSave();
+        });
+        fieldWrap.appendChild(input);
+        fieldsWrap.appendChild(fieldWrap);
+      }
+      block.appendChild(fieldsWrap);
     } else if (controlKind === 'input') {
       const input = el('input', 'answer-input');
       input.type = 'text';

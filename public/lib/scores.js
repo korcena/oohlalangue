@@ -67,10 +67,14 @@ export function scoreFromFeedback(feedback) {
 
 // Deterministic content hash used to dedupe a worksheet across re-send/resume.
 // Canonical content, in order: topic | level | for each section:
-//   id | (listening ? audio.cache_key or audio.script : '') | for each question: id | prompt.
+//   id | (listening ? audio.cache_key or audio.script : '') | for each question:
+//   id | prompt | (only when question.type is "form" and it has a non-empty
+//   fields array: `form-fields:` followed by each whitespace-collapsed label_fr
+//   length-prefixed as `<len>:<label>` and joined).
 // Each part is length-prefixed (`<len>:<part>`) before hashing so a prompt that
 // itself contains the `|` separator cannot make two different worksheets encode
-// to the same string. Never throws; a non-object worksheet hashes ''.
+// to the same string. A missing/empty fields array adds no part, so legacy
+// identities are unchanged. Never throws; a non-object worksheet hashes ''.
 export function worksheetIdentity(worksheet) {
   try {
     if (!isPlainObject(worksheet)) return fnv1a('');
@@ -92,6 +96,14 @@ export function worksheetIdentity(worksheet) {
           continue;
         }
         parts.push(collapse(question.id), collapse(question.prompt));
+        const fields = question.type === 'form' && Array.isArray(question.fields) ? question.fields : [];
+        if (fields.length) {
+          const labels = fields.map((field) => {
+            const label = collapse(field && field.label_fr);
+            return `${label.length}:${label}`;
+          });
+          parts.push(`form-fields:${labels.join('|')}`);
+        }
       }
     }
     return fnv1a(parts.map((part) => `${part.length}:${part}`).join('|'));

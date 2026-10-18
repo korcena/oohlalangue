@@ -153,6 +153,15 @@ test('scoreFromFeedback: an all-blank payload records nothing', async () => {
   assert.deepEqual(scores.scoreFromFeedback(feedback(list)), { correct: 0, total: 0, score: 0 });
 });
 
+test('scoreFromFeedback: a filled form counts once and an empty form is ignored', async () => {
+  const { scores } = await loadModules();
+  const list = [
+    { question_id: 'w1', verdict: 'correct', original: 'Nom : Durand ; Prénom : Marie' },
+    { question_id: 'w2', verdict: 'mistake', original: '' }
+  ];
+  assert.deepEqual(scores.scoreFromFeedback(feedback(list)), { correct: 1, total: 1, score: 100 });
+});
+
 // -- 7-8: worksheetIdentity -------------------------------------------------
 
 function baseWorksheet() {
@@ -214,6 +223,88 @@ test('worksheetIdentity: legacy-safe and never throws', async () => {
   assert.equal(
     scores.worksheetIdentity({ topic: 'x' }),
     scores.worksheetIdentity({ topic: 'x' })
+  );
+});
+
+test('worksheetIdentity: form labels distinguish and reorder forms', async () => {
+  const { scores } = await loadModules();
+  const formWorksheet = (labels) => ({
+    topic: 'À l’hôtel',
+    level: 'A1',
+    sections: [
+      {
+        id: 'writing',
+        questions: [
+          {
+            id: 'w1',
+            prompt: 'Complète ta fiche.',
+            type: 'form',
+            fields: labels.map((label_fr) => ({ label_fr }))
+          }
+        ]
+      }
+    ]
+  });
+
+  const nomPrenom = scores.worksheetIdentity(formWorksheet(['Nom', 'Prénom']));
+  const prenomNom = scores.worksheetIdentity(formWorksheet(['Prénom', 'Nom']));
+  const nomPrenomNation = scores.worksheetIdentity(formWorksheet(['Nom', 'Prénom', 'Nationalité']));
+  assert.notEqual(nomPrenom, prenomNom);
+  assert.notEqual(nomPrenom, nomPrenomNation);
+  assert.equal(
+    scores.worksheetIdentity(formWorksheet(['  Nom ', 'Prénom'])),
+    nomPrenom,
+    'labels are whitespace-collapsed'
+  );
+});
+
+test('worksheetIdentity: missing or empty fields preserve legacy identity', async () => {
+  const { scores } = await loadModules();
+  const legacy = baseWorksheet();
+  const withEmptyFields = baseWorksheet();
+  withEmptyFields.sections[1].questions[0].fields = [];
+  const withBlankFields = baseWorksheet();
+  withBlankFields.sections[1].questions[0].fields = undefined;
+  assert.equal(scores.worksheetIdentity(withEmptyFields), scores.worksheetIdentity(legacy));
+  assert.equal(scores.worksheetIdentity(withBlankFields), scores.worksheetIdentity(legacy));
+});
+
+test('worksheetIdentity: stray fields on a non-form question do not change identity', async () => {
+  const { scores } = await loadModules();
+  const withoutFields = baseWorksheet();
+  withoutFields.sections[1].questions[0].type = 'short_text';
+  const withFields = baseWorksheet();
+  withFields.sections[1].questions[0].type = 'short_text';
+  withFields.sections[1].questions[0].fields = [{ label_fr: 'Nom' }, { label_fr: 'Prénom' }];
+  assert.equal(
+    scores.worksheetIdentity(withFields),
+    scores.worksheetIdentity(withoutFields)
+  );
+});
+
+test('worksheetIdentity: length-prefixed form labels cannot collide', async () => {
+  const { scores } = await loadModules();
+  const formWorksheet = (labels) => ({
+    topic: 'À l’hôtel',
+    level: 'A1',
+    sections: [
+      {
+        id: 'writing',
+        questions: [
+          {
+            id: 'w1',
+            prompt: 'Complète ta fiche.',
+            type: 'form',
+            fields: labels.map((label_fr) => ({ label_fr }))
+          }
+        ]
+      }
+    ]
+  });
+  // A raw separator join makes these two label lists encode identically.
+  assert.notEqual(
+    scores.worksheetIdentity(formWorksheet(['a', 'b'])),
+    scores.worksheetIdentity(formWorksheet(['a\u0001b']))
   );
 });
 

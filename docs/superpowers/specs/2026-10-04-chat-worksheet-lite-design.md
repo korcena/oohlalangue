@@ -221,8 +221,9 @@ The model name is never hardcoded into prompts; `/health` reports which provider
         {
           "id": "string",
           "prompt": "string",
-          "type": "short_text|choice|fill_blank|translation",
+          "type": "short_text|choice|fill_blank|translation|form",
           "options": ["..."],
+          "fields": [{ "label_fr": "string (French field label — form only)" }],
           "answer": "string (hidden until reveal)",
           "explanation": "string"
         }
@@ -242,13 +243,24 @@ The worksheet follows DELF A1 format. The server assigns a **distinct A1 curricu
 each requested section and overwrites the model's `topic_fr` after validation; on the auto path
 the worksheet-level `topic` is a compact summary of the returned section themes (an explicit
 request `topic` is a legacy label kept verbatim and used for the first section). **Compréhension
-orale** questions are always `choice` with exactly 3 options and test comprehension/inference
-rather than verbatim matching. **Compréhension écrite** uses a short authentic document with a
-mix of `choice` (3 options) and `short_text` questions, including inference. **Grammaire**
-remains French-only grammar practice (no English→French translation). **Expression écrite** is
-a `short_text` DELF A1 production task: a short French situation/message plus a reply of
-environ 40–50 mots. Every learner-facing string (`topic_fr`, `title_fr`, `instructions_fr`, `text_fr`,
-prompts, options, answers and explanations) is written in French only.
+orale** is one short, natural, coherent A1 recording on the assigned theme: a station/airport
+announcement, a realistic voicemail, or a short dialogue between named speakers. It is 2–4 turns
+and about 20–45 words in total, with everyday vocabulary, a clear purpose and no nonsense,
+non-sequiturs or irrelevant lines. Its questions are always `choice` with exactly 3 options and
+test comprehension/inference rather than verbatim matching. A single-speaker message is written
+directly with no `Narratrice:`/`Narrateur:` prefix and lists exactly one speaker; a dialogue uses
+`Name: …` lines with the exact speaker names. **Compréhension écrite** uses a short authentic
+document with a mix of `choice` (3 options) and `short_text` questions, including inference.
+**Grammaire** remains French-only grammar practice (no English→French translation). **Expression
+écrite** contains exactly two `short_text`/`form` production questions: one `form` (a real-life
+fiche with 5–8 non-empty French `fields`, each `{ "label_fr": "…" }`) and one `short_text` reply
+of environ 40–50 mots to a short French situation/message. `fields` may appear only on `form`
+questions, and `form` only in the writing section. The client stores form answers as an object
+keyed by field label; the server serializes that object to a readable
+`Label : valeur ; Label : valeur` string for the feedback prompt and for `original` in the
+`/api/feedback` response (an all-empty form becomes `""`). Every learner-facing string
+(`topic_fr`, `title_fr`, `instructions_fr`, `text_fr`, prompts, options, field labels, answers
+and explanations) is written in French only.
 
 `/api/tts` accepts `{ utterances, speakers, cache_key }`, where `utterances` is an ordered list
 of `{ speaker, text }` lines. Because OpenAI TTS produces a single voice per call, dialogues

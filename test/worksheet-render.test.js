@@ -132,6 +132,15 @@ test('answerControlKind picks the right control per section and question type', 
   assert.equal(answerControlKind('translation_grammar', { type: 'translation' }), 'textarea');
 });
 
+test('answerControlKind returns form for a writing form before the textarea fallback', async () => {
+  const { answerControlKind } = await loadHelpers();
+  assert.equal(
+    answerControlKind('writing', { type: 'form', fields: [{ label_fr: 'Nom' }] }),
+    'form'
+  );
+  assert.equal(answerControlKind('writing', { type: 'form' }), 'form');
+});
+
 test('answerControlKind is defensive about missing sections, questions and types', async () => {
   const { answerControlKind } = await loadHelpers();
   assert.equal(answerControlKind(undefined, undefined), 'textarea');
@@ -139,6 +148,105 @@ test('answerControlKind is defensive about missing sections, questions and types
   assert.equal(answerControlKind('reading', {}), 'textarea');
   assert.equal(answerControlKind('reading', { type: 'mystery' }), 'textarea');
   assert.equal(answerControlKind(undefined, { type: 'short_text' }), 'input');
+});
+
+test('buildRenderModel maps form field labels before reveal without leaking the answer', async () => {
+  const { buildRenderModel } = await loadHelpers();
+  const worksheet = {
+    topic: 'À l’hôtel',
+    sections: [
+      {
+        id: 'writing',
+        title_fr: 'Expression écrite',
+        instructions_fr: 'Complète la fiche.',
+        questions: [
+          {
+            id: 'w1',
+            prompt: 'Complète ta fiche.',
+            type: 'form',
+            fields: [
+              { label_fr: 'Nom' },
+              { label_fr: 'Prénom' },
+              { label_fr: '' },
+              { nope: true }
+            ],
+            answer: 'SECRET FORM ANSWER',
+            explanation: 'SECRET FORM EXPLANATION'
+          },
+          {
+            id: 'w2',
+            prompt: 'Message',
+            type: 'short_text',
+            fields: [{ label_fr: 'STRAY LABEL' }],
+            answer: 'SECRET MESSAGE ANSWER',
+            explanation: 'SECRET MESSAGE EXPLANATION'
+          }
+        ]
+      }
+    ]
+  };
+
+  const model = buildRenderModel(worksheet, { reveal: false });
+  const [form, message] = model.sections[0].questions;
+  assert.deepEqual(form.fields, [{ label: 'Nom' }, { label: 'Prénom' }]);
+  assert.deepEqual(message.fields, [], 'a non-form question never gains labels');
+
+  const serialized = JSON.stringify(model);
+  assert.ok(serialized.includes('Nom'));
+  assert.ok(!serialized.includes('SECRET FORM ANSWER'));
+  assert.ok(!serialized.includes('SECRET FORM EXPLANATION'));
+  assert.ok(!serialized.includes('SECRET MESSAGE ANSWER'));
+  assert.ok(!serialized.includes('STRAY LABEL'));
+});
+
+test('buildRenderModel trims form labels and drops whitespace-only labels', async () => {
+  const { buildRenderModel } = await loadHelpers();
+  const model = buildRenderModel(
+    {
+      topic: 'À l’hôtel',
+      sections: [
+        {
+          id: 'writing',
+          questions: [
+            {
+              id: 'w1',
+              prompt: 'Complète ta fiche.',
+              type: 'form',
+              fields: [
+                { label_fr: '  Nom  ' },
+                { label_fr: '   ' },
+                { label_fr: '\tPrénom\n' }
+              ],
+              answer: 'a',
+              explanation: 'e'
+            }
+          ]
+        }
+      ]
+    },
+    { reveal: false }
+  );
+  assert.deepEqual(model.sections[0].questions[0].fields, [
+    { label: 'Nom' },
+    { label: 'Prénom' }
+  ]);
+});
+
+test('buildRenderModel yields empty fields for a legacy question without fields', async () => {
+  const { buildRenderModel } = await loadHelpers();
+  const model = buildRenderModel(
+    {
+      topic: 'x',
+      sections: [
+        {
+          id: 'writing',
+          questions: [{ id: 'w1', prompt: 'p', type: 'form', answer: 'a', explanation: 'e' }]
+        }
+      ]
+    },
+    { reveal: false }
+  );
+  assert.deepEqual(model.sections[0].questions[0].fields, []);
 });
 
 test('feedbackToUi preserves worksheet question order and keeps original adjacent to correction', async () => {

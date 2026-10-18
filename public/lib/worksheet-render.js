@@ -57,6 +57,7 @@ export function answerControlKind(sectionId, question) {
   const type = str(q.type);
   const options = Array.isArray(q.options) ? q.options : [];
   if (type === 'choice' && options.length) return 'choice';
+  if (type === 'form') return 'form';
   if (str(sectionId) === 'writing') return 'textarea';
   if (type === 'fill_blank' || type === 'short_text') return 'input';
   return 'textarea';
@@ -93,7 +94,13 @@ export function buildRenderModel(worksheet, { reveal = false } = {}) {
             id: str(q.id),
             prompt: str(q.prompt),
             type: str(q.type) || 'short_text',
-            options: Array.isArray(q.options) ? q.options.map(str) : []
+            options: Array.isArray(q.options) ? q.options.map(str) : [],
+            fields:
+              q.type === 'form' && Array.isArray(q.fields)
+                ? q.fields
+                    .map((field) => ({ label: str(field && field.label_fr).trim() }))
+                    .filter((field) => field.label)
+                : []
           };
           if (reveal) {
             model_q.answer = str(q.answer);

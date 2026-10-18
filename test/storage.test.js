@@ -74,6 +74,17 @@ test('worksheet keys save and resume including the last-saved timestamp', async 
   assert.deepEqual(r.getFeedback(), { answers: [] });
 });
 
+test('worksheet answers round-trip nested form objects', async () => {
+  const { createStorage } = await loadStorage();
+  const backend = fakeBackend();
+  const s = createStorage(backend, { autoMigrate: false });
+  const answers = { w1: { Nom: 'Durand', Prénom: 'Marie' }, w2: 'Bonjour !' };
+  assert.equal(s.setWorksheetAnswers(answers, 999), true);
+
+  const resumed = createStorage(backend, { autoMigrate: false });
+  assert.deepEqual(resumed.getWorksheetAnswers(), { answersByQuestionId: answers, lastSavedAt: 999 });
+});
+
 test('quota key round-trips through the storage wrapper', async () => {
   const { createStorage, KEYS } = await loadStorage();
   const backend = fakeBackend();

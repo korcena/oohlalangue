@@ -181,7 +181,7 @@ cleared, so resuming never re-bills TTS.
 | `POST /api/chat` | `{ messages, name, profile, skipQuestion, voiceMode }` | `{ text, raw }` |
 | `POST /api/generate` | `{ topic? (legacy label; per-section themes are auto-assigned from the A1 curriculum), level='A1', length, includeListening, name?, profile? }` | worksheet JSON (see below) |
 | `POST /api/tts` | `{ utterances:[{speaker,text}], speakers:[{name,voice}], cache_key }` | `{ segments:[{speaker,mime,base64,pause_after_ms}] }` |
-| `POST /api/feedback` | `{ worksheet, answers }` | `{ answers:[…], summary:{…} }` |
+| `POST /api/feedback` | `{ worksheet, answers }` (form answers may be objects keyed by field label) | `{ answers:[…], summary:{…} }`; each `original` is a readable string (`Label : valeur ; …`) |
 | `GET /health` | — | provider/config booleans (no secrets) |
 | `GET /api/auth` | — | `{ required }` |
 | `POST /api/auth` | password header/body | `{ ok }` or 401 |
@@ -201,8 +201,9 @@ Structured worksheet shape (see `docs/superpowers/specs/` for the full contract)
       "text_fr": "string (reading only)",
       "audio": { "script": "…", "speakers": [{ "name": "A", "voice": "alloy" }], "cache_key": "…" },
       "questions": [
-        { "id": "string", "prompt": "string", "type": "short_text|choice|fill_blank|translation",
-          "options": ["…"], "answer": "string", "explanation": "string" }
+        { "id": "string", "prompt": "string", "type": "short_text|choice|fill_blank|translation|form",
+          "options": ["… (choice only)"], "fields": [{ "label_fr": "… (form only)" }],
+          "answer": "string", "explanation": "string" }
       ]
     }
   ]
@@ -217,14 +218,21 @@ explicit request `topic` is kept as the legacy label and themes the first sectio
 
 The worksheet follows DELF A1 format:
 
-- **Compréhension orale** — short authentic-style recordings; every question is `choice` with
+- **Compréhension orale** — one short, natural, coherent A1 recording (station/airport
+  announcement, realistic voicemail, or short dialogue): 2–4 turns / about 20–45 words, with
+  everyday vocabulary, a clear purpose and no non-sequiturs. Every question is `choice` with
   exactly 3 options and tests comprehension/inference (place, time, person, intent, next action).
+  A single-speaker message has no `Narratrice:`/`Narrateur:` prefix; dialogues use
+  `Name: …` lines with the exact listed speaker names.
 - **Compréhension écrite** — a short authentic document in `text_fr`, mixing `choice` (3 options)
   and `short_text` questions, with at least one inference question.
 - **Grammaire** — French-only grammar practice (fill-in-the-blank, conjugation, agreement,
   French-sentence reformulation); never English→French translation.
-- **Expression écrite** — a short French situation/message and a `short_text` reply of
-  environ 40–50 mots.
+- **Expression écrite** — exactly two production tasks: one `form` (5–8 French `fields` with
+  `label_fr`, completed like a real-life fiche d'inscription) and one `short_text` reply of
+  environ 40–50 mots to a short French situation/message. The form is a field-based control, not
+  a single textarea; its answers are stored as an object keyed by field label and serialized by
+  the server before feedback.
 
 The `audio` block appears **only** on the `listening` section; `text_fr` (the French reading
 passage) appears **only** on the `reading` section and is required there. Every learner-facing
