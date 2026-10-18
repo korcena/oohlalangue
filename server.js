@@ -791,6 +791,7 @@ HARD RULES:
   2) ONE "short_text" question: the "prompt" presents a short French situation or message that the learner must understand (invitation, SMS, announcement, etc.), then asks the learner to reply in French in environ 40–50 mots. The situation and the task are both written in French only.
   Never ask for a translation. Do not add any other writing question.
 - Every question MUST have: id, prompt, type, answer, explanation. "options" is REQUIRED when type is "choice" and MUST be omitted otherwise. "fields" is REQUIRED when type is "form" and MUST be omitted otherwise.
+- Question ids MUST be unique across the ENTIRE worksheet, not just within one section. Never restart at "q1"/"q2"/"q3" in every section; prefix every id by its section (for example "l1", "l2" for listening, "r1", "r2" for reading, "g1", "g2" for grammar, "w1", "w2" for writing).
 - The "fields" array MUST appear ONLY on a "form" question, and "form" is allowed ONLY in the writing section.
 - "answer" is the model answer / answer key. It is delivered to the client by design but hidden in the UI until reveal.
 - Keep vocabulary and grammar at A1 level. Use short sentences.
@@ -875,7 +876,50 @@ function buildWorksheetRepairPrompt(errors) {
   return `Your previous response was rejected because:
 - ${(errors || ['unknown error']).join('\n- ')}
 
-Return the corrected worksheet as a SINGLE valid JSON object only. No markdown fences, no commentary. Fix every listed problem.`;
+Return the corrected worksheet as a SINGLE valid JSON object only. No markdown fences, no commentary. Fix every listed problem.
+Make every question id unique across the whole worksheet (prefix the ids by section, for example l1/r1/g1/w1).`;
+}
+
+// Make question ids globally unique before validation. Models commonly restart
+// at q1/q2/q3 in every section, while validateWorksheet requires ids to be
+// unique across the entire worksheet. This is deterministic and defensive:
+// malformed entries are skipped and the helper never throws.
+function ensureUniqueQuestionIds(worksheet) {
+  try {
+    if (!worksheet || typeof worksheet !== 'object' || Array.isArray(worksheet)) return worksheet;
+    if (!Array.isArray(worksheet.sections)) return worksheet;
+
+    const used = new Set();
+    worksheet.sections.forEach((section, si) => {
+      if (!section || typeof section !== 'object' || Array.isArray(section)) return;
+      if (!Array.isArray(section.questions)) return;
+
+      const rawSectionId = typeof section.id === 'string' ? section.id.trim() : '';
+      const sectionPrefix =
+        rawSectionId.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || `s${si + 1}`;
+
+      section.questions.forEach((question, qi) => {
+        if (!question || typeof question !== 'object' || Array.isArray(question)) return;
+
+        const rawId = typeof question.id === 'string' ? question.id.trim() : '';
+        const base = rawId || `q${qi + 1}`;
+        let candidate = base;
+        if (used.has(candidate)) {
+          candidate = `${sectionPrefix}-${base}`;
+          let suffix = 2;
+          while (used.has(candidate)) {
+            candidate = `${sectionPrefix}-${base}-${suffix}`;
+            suffix += 1;
+          }
+        }
+        question.id = candidate;
+        used.add(candidate);
+      });
+    });
+  } catch (_err) {
+    // Defensive only: malformed input must never break generation.
+  }
+  return worksheet;
 }
 
 function validateWorksheet(value) {
@@ -1402,7 +1446,7 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
         timeoutMs
       });
 
-      let parsed = restrictToRequestedSections(extractJson(first.text));
+      let parsed = ensureUniqueQuestionIds(restrictToRequestedSections(extractJson(first.text)));
       let check = parsed ? validateWorksheet(parsed) : { ok: false, errors: ['response was not valid JSON'] };
 
       if (!check.ok) {
@@ -1416,7 +1460,7 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
           maxTokens: Number(env.WORKSHEET_MAX_TOKENS) || 3000,
           timeoutMs
         });
-        parsed = restrictToRequestedSections(extractJson(repaired.text));
+        parsed = ensureUniqueQuestionIds(restrictToRequestedSections(extractJson(repaired.text)));
         check = parsed ? validateWorksheet(parsed) : { ok: false, errors: ['repair response was not valid JSON'] };
         if (!check.ok) {
           console.error('[generate] invalid worksheet after repair:', check.errors);
@@ -1741,6 +1785,7 @@ module.exports = {
   sanitizeProfile,
   checkPassword,
   safeEqual,
+  ensureUniqueQuestionIds,
   validateWorksheet,
   validateFeedback,
   normalizeWorksheet,

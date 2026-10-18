@@ -17,6 +17,7 @@ const {
   normalizeWorksheet,
   normalizeAnswers,
   formatAnswerForPrompt,
+  ensureUniqueQuestionIds,
   validateFeedback,
   extractJson,
   worksheetAudioKey,
@@ -473,6 +474,69 @@ test('POST /api/generate accepts a valid worksheet and computes the audio cache 
   });
 });
 
+test('POST /api/generate de-duplicates repeated question ids without a repair call', async () => {
+  const duplicateWorksheet = {
+    topic: 'Ids répétés',
+    level: 'A1',
+    sections: [
+      {
+        id: 'reading',
+        title_fr: 'Compréhension écrite',
+        topic_fr: 'La Famille',
+        instructions_fr: 'Lis et réponds.',
+        text_fr: 'Paul entre dans un café et commande un café.',
+        questions: [
+          {
+            id: 'q1',
+            prompt: 'Où ?',
+            type: 'choice',
+            options: ['au café', 'à l’école', 'au parc'],
+            answer: 'au café',
+            explanation: 'Lieu de la scène.'
+          },
+          { id: 'q2', prompt: 'Qui ?', type: 'short_text', answer: 'Paul', explanation: 'Personne.' },
+          { id: 'q3', prompt: 'Quoi ?', type: 'short_text', answer: 'un café', explanation: 'Commande.' }
+        ]
+      },
+      {
+        id: 'translation_grammar',
+        title_fr: 'Grammaire',
+        topic_fr: 'Les Métiers',
+        instructions_fr: 'Complète les phrases.',
+        questions: [
+          { id: 'q1', prompt: 'Je ___ français.', type: 'fill_blank', answer: 'parle', explanation: 'Verbe parler.' },
+          { id: 'q2', prompt: 'Nous ___ à Paris.', type: 'fill_blank', answer: 'allons', explanation: 'Verbe aller.' },
+          { id: 'q3', prompt: 'Elle ___ contente.', type: 'fill_blank', answer: 'est', explanation: 'Verbe être.' }
+        ]
+      }
+    ]
+  };
+  const fetchImpl = makeFetchMock(() =>
+    jsonResponse(200, { message: { content: JSON.stringify(duplicateWorksheet) } })
+  );
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topic: 'Ids répétés', includeListening: false })
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const ids = body.sections.flatMap((section) => section.questions.map((question) => question.id));
+    assert.equal(new Set(ids).size, ids.length, 'question ids must be globally unique');
+    assert.deepEqual(ids, [
+      'q1',
+      'q2',
+      'q3',
+      'translation_grammar-q1',
+      'translation_grammar-q2',
+      'translation_grammar-q3'
+    ]);
+    assert.equal(fetchImpl.calls.length, 1, 'de-duplication must avoid a repair retry');
+  });
+});
+
 test('POST /api/generate keeps form fields in the normalized response', async () => {
   const formWorksheet = {
     topic: 'À l’hôtel',
@@ -790,6 +854,92 @@ test('worksheet prompts encode the DELF A1 contract', () => {
   assert.match(prompt, /single-speaker message is one turn/);
   assert.match(prompt, /20–45 words/);
   assert.match(prompt, /Narratrice/);
+});
+
+// ---------------------------------------------------------------------------
+// ensureUniqueQuestionIds — global de-duplication before validation
+// ---------------------------------------------------------------------------
+
+test('ensureUniqueQuestionIds rewrites duplicate ids across sections', () => {
+  const worksheet = {
+    sections: [
+      { id: 'listening', questions: [{ id: 'q1' }, { id: 'q2' }] },
+      { id: 'reading', questions: [{ id: 'q1' }, { id: 'q2' }] }
+    ]
+  };
+  const result = ensureUniqueQuestionIds(worksheet);
+  assert.equal(result, worksheet, 'the parsed worksheet is mutated in place');
+  const ids = result.sections.flatMap((section) => section.questions.map((q) => q.id));
+  assert.deepEqual(ids, ['q1', 'q2', 'reading-q1', 'reading-q2']);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('ensureUniqueQuestionIds preserves already unique ids', () => {
+  const worksheet = {
+    sections: [
+      { id: 'listening', questions: [{ id: 'l1' }] },
+      { id: 'reading', questions: [{ id: 'r1' }] }
+    ]
+  };
+  ensureUniqueQuestionIds(worksheet);
+  assert.deepEqual(
+    worksheet.sections.flatMap((section) => section.questions.map((q) => q.id)),
+    ['l1', 'r1']
+  );
+});
+
+test('ensureUniqueQuestionIds fills missing and blank ids', () => {
+  const worksheet = {
+    sections: [
+      { id: 'listening', questions: [{}, { id: '   ' }, { id: 'q3' }] },
+      { id: '', questions: [{ id: 'q1' }, { id: 'q1' }] }
+    ]
+  };
+  ensureUniqueQuestionIds(worksheet);
+  assert.deepEqual(
+    worksheet.sections.flatMap((section) => section.questions.map((q) => q.id)),
+    ['q1', 'q2', 'q3', 's2-q1', 's2-q1-2']
+  );
+});
+
+test('ensureUniqueQuestionIds handles duplicates within one section', () => {
+  const worksheet = {
+    sections: [{ id: 'reading', questions: [{ id: 'q1' }, { id: 'q1' }, { id: 'q1' }] }]
+  };
+  ensureUniqueQuestionIds(worksheet);
+  assert.deepEqual(
+    worksheet.sections[0].questions.map((q) => q.id),
+    ['q1', 'reading-q1', 'reading-q1-2']
+  );
+});
+
+test('ensureUniqueQuestionIds is defensive about malformed input', () => {
+  for (const value of [null, undefined, 42, 'nope', [], { sections: null }, { sections: 'no' }]) {
+    assert.doesNotThrow(() => ensureUniqueQuestionIds(value));
+    assert.equal(ensureUniqueQuestionIds(value), value);
+  }
+  const worksheet = {
+    sections: [
+      null,
+      7,
+      { questions: null },
+      { id: 'reading', questions: [null, 9, { id: 'q1' }] }
+    ]
+  };
+  assert.doesNotThrow(() => ensureUniqueQuestionIds(worksheet));
+  assert.equal(worksheet.sections[3].questions[2].id, 'q1');
+});
+
+test('ensureUniqueQuestionIds is deterministic', () => {
+  const makeWorksheet = () => ({
+    sections: [
+      { id: 'reading', questions: [{ id: 'q1' }, { id: 'q1' }] },
+      { id: 'translation_grammar', questions: [{ id: 'q1' }, { id: '' }] }
+    ]
+  });
+  const first = ensureUniqueQuestionIds(makeWorksheet());
+  const second = ensureUniqueQuestionIds(makeWorksheet());
+  assert.deepEqual(first, second);
 });
 
 // ---------------------------------------------------------------------------
