@@ -65,6 +65,74 @@ export function scoreFromFeedback(feedback) {
   }
 }
 
+// Normalize an optional worksheet or id collection into the set of allowed ids
+// and the set of unrated (choice) ids. Returns null when no filter was supplied.
+function ratingFilter(source) {
+  if (!source) return null;
+  if (source instanceof Set) return { allowed: source, unrated: new Set() };
+  if (Array.isArray(source)) {
+    return {
+      allowed: new Set(source.filter((id) => typeof id === 'string' && id.trim())),
+      unrated: new Set()
+    };
+  }
+  if (isPlainObject(source)) {
+    const allowed = new Set();
+    const unrated = new Set();
+    const sections = Array.isArray(source.sections) ? source.sections : [];
+    for (const section of sections) {
+      const questions = section && Array.isArray(section.questions) ? section.questions : [];
+      for (const question of questions) {
+        if (question && typeof question.id === 'string' && question.id.trim()) {
+          allowed.add(question.id);
+          if (question.type === 'choice') unrated.add(question.id);
+        }
+      }
+    }
+    return { allowed, unrated };
+  }
+  return null;
+}
+
+// Sum the per-answer ratings from an `/api/feedback` payload. Only plain-object
+// entries carrying a non-empty `question_id`, an integer `score` and an integer
+// `max_score` of 5 or 10, with `1 <= score <= max_score`, count. Duplicate ids
+// use the last entry (matching `feedbackToUi`). An optional worksheet (or set
+// of ids) filters out unknown/stale ids and choice questions. Multiple-choice
+// (no scores) and malformed entries are ignored. Fail-open: never throws,
+// corrupt input is treated as no ratings.
+export function pointsFromFeedback(feedback, worksheetOrIds) {
+  try {
+    const answers = feedback && Array.isArray(feedback.answers) ? feedback.answers : [];
+    const filter = ratingFilter(worksheetOrIds);
+    const byId = new Map();
+    for (const entry of answers) {
+      if (!isPlainObject(entry)) continue;
+      const questionId = typeof entry.question_id === 'string' ? entry.question_id.trim() : '';
+      if (!questionId) continue;
+      byId.set(questionId, entry);
+    }
+
+    let points = 0;
+    let max = 0;
+    let count = 0;
+    for (const [questionId, entry] of byId) {
+      if (filter && (!filter.allowed.has(questionId) || filter.unrated.has(questionId))) continue;
+      const score = entry.score;
+      const maxScore = entry.max_score;
+      if (!Number.isInteger(score) || !Number.isInteger(maxScore)) continue;
+      if (maxScore !== 5 && maxScore !== 10) continue;
+      if (score < 1 || score > maxScore) continue;
+      points += score;
+      max += maxScore;
+      count += 1;
+    }
+    return { points, max, count };
+  } catch (_e) {
+    return { points: 0, max: 0, count: 0 };
+  }
+}
+
 // Deterministic content hash used to dedupe a worksheet across re-send/resume.
 // Canonical content, in order: topic | level | for each section:
 //   id | (listening ? audio.cache_key or audio.script : '') | for each question:

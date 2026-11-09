@@ -53,21 +53,27 @@ with mocked dependencies; see `npm test`.
       exactly three options and short answers, and at least one answer is not stated explicitly.
 - [ ] The `Grammaire` section stays French-only (fill-in-the-blank, conjugation, agreement,
       French-sentence reformulation), with no English→French translation.
-- [ ] The `Expression écrite` section contains exactly two tasks: a **form** with 5–8 visible
-      French labels rendered as single-line inputs, and a message task rendered as a textarea
-      asking for a reply of environ 40–50 mots in French.
-- [ ] The form labels are rendered as text (inspect the DOM: no HTML injection; `textContent`).
-- [ ] Type into several form fields; the save-state shows **Enregistrement… → Enregistré**.
-- [ ] Refresh: every form field value restores, the message textarea restores, and no
-      `/api/generate` call is made.
-- [ ] Leave/re-enter the view (`#/chat` then back) with a pending debounce: form values are
+- [ ] The `Expression écrite` section contains exactly **4 `short_text` tasks**, all rendered as
+      textareas. The first three ask for one or two complete French sentences; the last is a
+      short message/letter/SMS of about 40–50 words. `instructions_fr` explicitly says to answer
+      the first three questions in one or two sentences and to write a 40–50-word message for the
+      last.
+- [ ] No writing prompt asks for `Nom`, `Prénom`, `Nationalité`, date of birth, address, phone or
+      e-mail, and no new question uses a `form`/`fields` control.
+- [ ] Type into all four writing textareas; the save-state shows **Enregistrement… → Enregistré**.
+- [ ] Refresh: all four writing answers restore and no `/api/generate` call is made.
+- [ ] Leave/re-enter the view (`#/chat` then back) with a pending debounce: writing values are
       flushed, not lost.
-- [ ] Reveal shows the model form answer string (for example `Nom : … ; Prénom : …`) after the
-      form and after the message.
-- [ ] Send to teacher: feedback shows a readable `Nom : … ; Prénom : …` original for the form,
-      never `[object Object]`.
-- [ ] Submit an all-empty form with other answers filled: the form does not count in the score.
-- [ ] Fill at least one form field: the form counts as one graded question.
+- [ ] Reveal shows each model answer after its question, including the last message answer.
+- [ ] Send to teacher with all four writing answers filled: feedback shows the learner's own
+      answer for each writing question with a `Note : X/Y` badge (1–5 for the first three, 1–10
+      for the last) and a summary `Points : X/Y` line.
+- [ ] Submit with an untouched writing question: feedback shows `Aucune réponse` and the
+      server-authoritative score is 1 for that question (a fabricated model original is replaced
+      by the real blank answer).
+- [ ] Submit a deliberately wrong writing sentence: the feedback diff shows the wrong words in
+      red strikethrough and the correction in green, inline; an `alternative` answer is not
+      struck through and uses the green-tinted correction box.
 - [ ] With no text provider configured, Generate shows the server's actionable error and renders
       no worksheet (never fabricated content).
 - [ ] No "Indice" control exists anywhere in the worksheet DOM.
@@ -80,9 +86,13 @@ with mocked dependencies; see `npm test`.
 - [ ] Simulate a quota error (fill localStorage) → answers stay in memory and **Échec …** is shown;
       text is never silently dropped.
 - [ ] Leave the view (`#/chat` then back) with a pending debounce → answers were flushed, not lost.
-- [ ] **Old-fiche regression:** load a fiche saved before this change (no `topic_fr`, no `form`
-      and no `fields`); it renders, autosaves, reveals, sends feedback and records a score
-      without errors.
+- [ ] **Old-fiche regression:** load a legacy fixture that explicitly contains a `form` question
+      with `fields` (plus any older missing `topic_fr`). It still renders the form labels and
+      inputs, autosaves, reveals, sends feedback with a readable `Label : valeur` original, and
+      receives a legacy rating out of 5 without errors.
+- [ ] **Feedback completeness regression:** a mocked/partial provider response that omits an
+      answer, invents an unknown id, or repeats an id triggers one repair; a valid final response
+      returns exactly one row per worksheet question in worksheet order.
 - [ ] **Legacy API compatibility (optional):** an explicit `/api/generate` request `topic` still
       returns that label and themes the first section; later sections get distinct curriculum
       themes.
@@ -113,6 +123,13 @@ with mocked dependencies; see `npm test`.
       **Ta réponse** + explicit **Correct / Erreur / Alternative** label + correction + explanation +
       error type (meaning never depends on colour alone). Feedback, correction, explanation and
       summary are all written in French.
+- [ ] A wrong free-response answer shows an inline diff: red struck-through words and green
+      replacements, with the legend `rouge = à corriger · vert = correction`. An `alternative`
+      answer is plain (no strikethrough) with a green-tinted correction box; a `correct` answer is
+      plain. A blank answer shows `Aucune réponse`, is marked **Erreur** (never green **Correct**),
+      and gets score 1 when rated.
+- [ ] Each rated feedback card shows `Note : X/Y` (1–5, or 1–10 for the last writing message) and
+      the summary shows `Points : X/Y`; multiple-choice cards show no rating.
 - [ ] The summary card shows strengths (Points forts), recurring mistakes (Erreurs récurrentes),
       priorities (Priorités) and follow-up (Exercice de suivi).
 - [ ] Refresh keeps feedback.
@@ -152,6 +169,8 @@ with mocked dependencies; see `npm test`.
 - [ ] Send a fiche to the teacher from `#/worksheet`, then navigate to `#/`: the "Progrès" card
       lists this week's fiche using the fiche's summary topic (the same `topic` shown as
       `Fiche : …`) or "Fiche" + score %, and the weekly average.
+- [ ] The worksheet feedback summary's `Points : X/Y` is rating-based; it does not change the
+      Progrès chart, which stays verdict-based.
 - [ ] Send a second (different) fiche: both appear under "Cette semaine", and the average updates
       to the mean of the two scores.
 - [ ] Re-send the same fiche (reopen it, send again): no duplicate appears — the existing entry is

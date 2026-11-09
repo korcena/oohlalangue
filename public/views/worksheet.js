@@ -14,6 +14,7 @@ import {
   buildRenderModel,
   feedbackToUi,
   deriveUtterances,
+  diffWords,
   isRevealedFromAnswers,
   answerControlKind,
   REVEAL_KEY
@@ -24,7 +25,12 @@ import {
   recordGeneration,
   WEEKLY_LIMIT
 } from '../lib/quota.js';
-import { recordScore, scoreFromFeedback, worksheetIdentity } from '../lib/scores.js';
+import {
+  pointsFromFeedback,
+  recordScore,
+  scoreFromFeedback,
+  worksheetIdentity
+} from '../lib/scores.js';
 
 const SAVE_DEBOUNCE_MS = 600;
 const SLOW_RATE = 0.75;
@@ -506,19 +512,60 @@ export function mount(container, ctx) {
     const card = el('div', 'feedback ' + (row.verdict || ''));
     const headRow = el('div', 'fb-head');
     headRow.appendChild(el('span', 'fb-label', 'Ta réponse'));
-    headRow.appendChild(el('span', null, row.original));
+
+    const original = row.original == null ? '' : String(row.original);
+    const correction = row.correction == null ? '' : String(row.correction);
+    const isMistake = row.verdict === 'mistake' && correction.trim() !== '';
+    let diffRendered = false;
+
+    if (!original.trim()) {
+      headRow.appendChild(el('span', 'fb-empty', 'Aucune réponse'));
+    } else if (isMistake) {
+      const diffWrap = el('div', 'fb-diff');
+      const runs = diffWords(original, correction);
+      if (runs === null) {
+        diffWrap.textContent = original;
+      } else {
+        runs.forEach((run, index) => {
+          if (run.type === 'same') {
+            diffWrap.appendChild(document.createTextNode(run.text));
+          } else if (run.type === 'del') {
+            diffWrap.appendChild(el('del', 'diff-del', run.text));
+          } else {
+            diffWrap.appendChild(el('ins', 'diff-ins', run.text));
+          }
+          if (index < runs.length - 1) diffWrap.appendChild(document.createTextNode(' '));
+        });
+        diffRendered = runs.some((run) => run.type === 'del' || run.type === 'ins');
+      }
+      headRow.appendChild(diffWrap);
+    } else {
+      headRow.appendChild(el('span', null, original));
+    }
     card.appendChild(headRow);
+
+    if (diffRendered) {
+      card.appendChild(el('div', 'diff-legend', 'rouge = à corriger · vert = correction'));
+    }
 
     const verdictRow = el('div', 'fb-head');
     verdictRow.appendChild(el('span', 'verdict', row.verdictLabel || row.verdict));
     verdictRow.appendChild(
       el('span', 'error-type', row.errorTypeLabel ? `Type : ${row.errorTypeLabel}` : '')
     );
+    if (Number.isInteger(row.score) && Number.isInteger(row.maxScore) && row.maxScore > 0) {
+      const ratio = row.score / row.maxScore;
+      const tone = ratio >= 0.8 ? 'score-high' : ratio >= 0.5 ? 'score-mid' : 'score-low';
+      verdictRow.appendChild(el('span', `score-badge ${tone}`, `Note : ${row.score}/${row.maxScore}`));
+    }
     card.appendChild(verdictRow);
 
-    const correctionBox = el('div', 'correction');
+    const correctionBox = el(
+      'div',
+      row.verdict === 'alternative' ? 'correction correction-alt' : 'correction'
+    );
     correctionBox.appendChild(el('span', 'fb-label', 'Correction'));
-    correctionBox.appendChild(el('div', null, row.correction));
+    correctionBox.appendChild(el('div', null, correction));
     card.appendChild(correctionBox);
 
     if (row.explanation) {
@@ -531,9 +578,13 @@ export function mount(container, ctx) {
   }
 
   function renderSummary(feedback) {
+    const points = pointsFromFeedback(feedback, state.worksheet);
     const summary = feedback && feedback.summary ? feedback.summary : null;
     const card = el('section', 'summary-card');
     card.appendChild(el('h3', null, 'Bilan du professeur'));
+    if (points.count > 0) {
+      card.appendChild(el('div', 'summary-points', `Points : ${points.points}/${points.max}`));
+    }
     if (!summary) return card;
 
     const lists = [

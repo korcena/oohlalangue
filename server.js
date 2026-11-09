@@ -739,7 +739,23 @@ function selectProvider(env = process.env, deps = {}) {
 // ---------------------------------------------------------------------------
 
 const WORKSHEET_SECTION_IDS = ['listening', 'reading', 'translation_grammar', 'writing'];
-const QUESTION_TYPES = ['short_text', 'choice', 'fill_blank', 'translation', 'form'];
+const WRITING_QUESTION_COUNT = 4;
+const QUESTION_TYPES = ['short_text', 'choice', 'fill_blank', 'translation'];
+// Legacy `form` questions are no longer generated but still appear in saved
+// fiches; they remain rated (always out of 5) for backward compatibility.
+const RATED_QUESTION_TYPES = ['short_text', 'fill_blank', 'translation', 'form'];
+// Narrow identity/contact guard for generated writing prompts. These patterns
+// are learner-directed on purpose: a third-person description such as
+// "Décris une personne célèbre : son prénom et sa nationalité." must pass.
+const WRITING_IDENTITY_PATTERNS = [
+  /\b(?:ton|ta|tes|votre|vos)\s+(?:nom|pr[ée]nom|nationalit[ée]|adresse|num[ée]ro(?:\s+de\s+t[ée]l[ée]phone)?|t[ée]l[ée]phone|portable|e-?mail|courriel)(?![\p{L}])/iu,
+  /\bnom\s+de\s+famille\b/i,
+  /\b(?:ton|ta|votre|vos)\s+date\s+de\s+naissance\b/i,
+  /\bcomment\s+(?:tu\s+t['’]appelles|vous\s+vous\s+appelez)\b/i,
+  /\bcomment\s+t['’]appelles-tu\b/i,
+  /\btu\s+t['’]appelles\s+comment\b/i,
+  /\bquel(?:le)?\s+est\s+(?:ton|votre)\s+(?:nom|pr[ée]nom|nationalit[ée]|adresse|num[ée]ro|t[ée]l[ée]phone|e-?mail|courriel)(?![\p{L}])/iu
+];
 const FEEDBACK_VERDICTS = ['correct', 'mistake', 'alternative'];
 const FEEDBACK_ERROR_TYPES = ['error', 'style', 'alternative'];
 
@@ -766,9 +782,8 @@ The object MUST match this shape exactly:
         {
           "id": "unique-string-id",
           "prompt": "La question, en français uniquement — aucune traduction ni glose en anglais",
-          "type": "short_text | choice | fill_blank | translation | form",
+          "type": "short_text | choice | fill_blank | translation",
           "options": ["only for choice questions"],
-          "fields": [{ "label_fr": "Libellé du champ, en français uniquement" }],
           "answer": "the expected answer (hidden until the learner reveals it)",
           "explanation": "Explication de la réponse, en français uniquement"
         }
@@ -786,13 +801,9 @@ HARD RULES:
 - AUDIO SCRIPT FORMAT (important for voicing): For a single-speaker announcement or voicemail, write the message directly as plain French sentences with NO speaker label or prefix (never "Narratrice:", "Narrateur:", "Voix:" or similar), and list exactly ONE speaker. For a dialogue, write one line per turn, each line beginning with the speaker's exact "name" followed by a colon, e.g. "Marie: Bonjour !\\nPaul: Salut Marie !". Use only the exact speaker "name" values from "speakers", give each a distinct "voice" value ("male" or "female"), and never add a narrator line or a line spoken by anyone who is not listed in "speakers".
 - COMPRÉHENSION ÉCRITE (DELF A1): The reading section MUST contain exactly 5 questions. "text_fr" is a short authentic-style A1 document (courriel, SMS, panneau, annonce, publicité, menu or message) on the assigned theme. Use a mix of "choice" questions (EXACTLY 3 options) and "short_text" questions. At least one question (preferably two) MUST require inference or deduction from the text; do not make every answer a sentence copied verbatim from "text_fr". Every question must be answerable from "text_fr" alone.
 - GRAMMAIRE: French-only grammar practice on the assigned theme. Use fill-in-the-blank (fill_blank), conjugation, singular/plural or masculine/feminine transforms, and reformulation of a FRENCH sentence (short_text). NEVER ask the learner to translate from English; never emit a "translation" question whose source sentence is English.
-- EXPRESSION ÉCRITE (DELF A1): The writing section MUST contain EXACTLY TWO questions, regardless of the requested worksheet length:
-  1) ONE "form" question: the "prompt" is a short French situation asking the learner to complete a real-life form (fiche d'inscription à l'hôtel, formulaire d'inscription à un cours, etc.). It MUST have a non-empty "fields" array of 5–8 objects, each with ONLY a non-empty French "label_fr" (for example "Nom", "Prénom", "Nationalité", "Date d'arrivée", "Date de départ"). Its "answer" is a French model of the completed form as one readable string. The prompt, labels, answer and explanation are French only.
-  2) ONE "short_text" question: the "prompt" presents a short French situation or message that the learner must understand (invitation, SMS, announcement, etc.), then asks the learner to reply in French in environ 40–50 mots. The situation and the task are both written in French only.
-  Never ask for a translation. Do not add any other writing question.
-- Every question MUST have: id, prompt, type, answer, explanation. "options" is REQUIRED when type is "choice" and MUST be omitted otherwise. "fields" is REQUIRED when type is "form" and MUST be omitted otherwise.
-- Question ids MUST be unique across the ENTIRE worksheet, not just within one section. Never restart at "q1"/"q2"/"q3" in every section; prefix every id by its section (for example "l1", "l2" for listening, "r1", "r2" for reading, "g1", "g2" for grammar, "w1", "w2" for writing).
-- The "fields" array MUST appear ONLY on a "form" question, and "form" is allowed ONLY in the writing section.
+- EXPRESSION ÉCRITE (DELF A1): The writing section MUST contain EXACTLY ${WRITING_QUESTION_COUNT} "short_text" questions. The first ${WRITING_QUESTION_COUNT - 1} questions MUST be answered in one or two complete French sentences at A1 level. The LAST writing question MUST be the short communicative message/letter/SMS task (environ 40–50 mots). Use this mix: a preference/opinion question, a routine/weekend question, a description question, and a short communicative message. "instructions_fr" MUST be exactly: "Réponds aux ${WRITING_QUESTION_COUNT - 1} premières questions en une ou deux phrases complètes, puis écris un message de 40 à 50 mots pour la dernière question." Questions, answers and explanations are French only; never ask for a translation. NEVER ask for identity or contact details: no "Nom", "Prénom", "Nationalité", "date de naissance", "adresse", "téléphone" or "e-mail". Do not use type "form" and never include a "fields" array.
+- Every question MUST have: id, prompt, type, answer, explanation. "options" is REQUIRED when type is "choice" and MUST be omitted otherwise. Never include a "fields" array on any question.
+- Question ids MUST be unique across the ENTIRE worksheet, not just within one section. Never restart at "q1"/"q2"/"q3" in every section; prefix every id by its section (for example "l1", "l2" for listening, "r1", "r2" for reading, "g1", "g2" for grammar, "w1", "w2", "w3", "w4" for writing).
 - "answer" is the model answer / answer key. It is delivered to the client by design but hidden in the UI until reveal.
 - Keep vocabulary and grammar at A1 level. Use short sentences.
 - EVERY learner-facing string MUST be written in French only: "topic_fr", "title_fr", "instructions_fr", "text_fr", "prompt", "options", "answer" and "explanation". Never write English — not even in parentheses, not as a translation or gloss.
@@ -801,9 +812,9 @@ HARD RULES:
 
 function lengthToCounts(length) {
   const key = String(length || 'medium').toLowerCase();
-  if (key === 'short') return { reading: 5, translation_grammar: 3, writing: 2, listening: 5 };
-  if (key === 'long') return { reading: 5, translation_grammar: 6, writing: 2, listening: 5 };
-  return { reading: 5, translation_grammar: 4, writing: 2, listening: 5 };
+  if (key === 'short') return { reading: 5, translation_grammar: 3, writing: WRITING_QUESTION_COUNT, listening: 5 };
+  if (key === 'long') return { reading: 5, translation_grammar: 6, writing: WRITING_QUESTION_COUNT, listening: 5 };
+  return { reading: 5, translation_grammar: 4, writing: WRITING_QUESTION_COUNT, listening: 5 };
 }
 
 function buildWorksheetPrompt({
@@ -860,10 +871,7 @@ function buildWorksheetPrompt({
     `- translation_grammar (Grammaire) — theme: "${themeFor('translation_grammar')}"${focusFor('translation_grammar')}. ${counts.translation_grammar} French-only grammar exercises on this theme (fill in the blank, conjugation, singular/plural and masculine/feminine transforms, French sentence reformulation). Never English→French translation.`
   );
   lines.push(
-    `- writing (Expression écrite) — theme: "${themeFor('writing')}"${focusFor('writing')}. Exactly TWO DELF A1 production questions, regardless of worksheet length:
-  1) ONE type "form" question: a short French prompt asking the learner to complete an authentic form (fiche d'inscription à l'hôtel, formulaire d'inscription à un cours, etc.). Provide 5–8 "fields", each an object with a non-empty French "label_fr" (for example "Nom", "Prénom", "Nationalité", "Date d'arrivée", "Date de départ"). The "answer" is a French model of the completed form as one readable string.
-  2) ONE type "short_text" question: a short French situation/message the learner must understand (invitation, SMS, announcement, etc.), asking for a reply in French in environ 40–50 mots.
-  Both prompts, field labels, answers and explanations are French only. Never ask for a translation. Omit "fields" on the short_text question.`
+    `- writing (Expression écrite) — theme: "${themeFor('writing')}"${focusFor('writing')}. Exactly ${counts.writing} "short_text" questions. The first ${counts.writing - 1} questions MUST be answered in one or two complete French sentences at A1 level. The LAST writing question MUST be the short communicative message/letter/SMS task (environ 40–50 mots). Use this mix: a preference/opinion question, a routine/weekend question, a description question, and a short communicative message. Set "instructions_fr" to this French sentence: "Réponds aux ${counts.writing - 1} premières questions en une ou deux phrases complètes, puis écris un message de 40 à 50 mots pour la dernière question." Questions, answers and explanations are French only; never ask for a translation. NEVER ask for identity or contact details: no "Nom", "Prénom", "Nationalité", "date de naissance", "adresse", "téléphone" or "e-mail". Do not use type "form" and never include a "fields" array.`
   );
   lines.push('');
   lines.push('Every section MUST include "topic_fr" set to the theme assigned above.');
@@ -1014,6 +1022,15 @@ function validateWorksheet(value) {
         seenQuestionIds.add(q.id);
       }
       if (typeof q.prompt !== 'string' || !q.prompt.trim()) errors.push(`${qWhere}.prompt must be a non-empty string`);
+      if (
+        section.id === 'writing' &&
+        typeof q.prompt === 'string' &&
+        WRITING_IDENTITY_PATTERNS.some((pattern) => pattern.test(q.prompt))
+      ) {
+        errors.push(
+          `${qWhere}.prompt must not ask for identity or contact details (Nom, Prénom, Nationalité, date de naissance, adresse, téléphone, e-mail)`
+        );
+      }
       if (!QUESTION_TYPES.includes(q.type)) errors.push(`${qWhere}.type must be one of ${QUESTION_TYPES.join(' | ')}`);
       if (isListening && q.type !== 'choice') {
         errors.push(`${qWhere}.type must be "choice" for the listening section (DELF A1 multiple choice)`);
@@ -1021,28 +1038,11 @@ function validateWorksheet(value) {
       if (isListening && q.type === 'choice' && Array.isArray(q.options) && q.options.length !== 3) {
         errors.push(`${qWhere}.options must contain exactly 3 options for the listening section`);
       }
-      if (q.type === 'form' && section.id !== 'writing') {
-        errors.push(`${qWhere}.type "form" is only allowed in the writing section`);
+      if (section.id === 'writing' && q.type !== 'short_text') {
+        errors.push(`${qWhere}.type must be "short_text" for the writing section`);
       }
-      if (section.id === 'writing' && q.type !== 'short_text' && q.type !== 'form') {
-        errors.push(`${qWhere}.type must be "short_text" or "form" for the writing section`);
-      }
-      if (q.type === 'form') {
-        if (!Array.isArray(q.fields) || q.fields.length === 0) {
-          errors.push(`${qWhere}.fields must be a non-empty array for form questions`);
-        } else {
-          q.fields.forEach((field, fi) => {
-            if (!field || typeof field !== 'object' || Array.isArray(field)) {
-              errors.push(`${qWhere}.fields[${fi}] must be an object`);
-              return;
-            }
-            if (typeof field.label_fr !== 'string' || !field.label_fr.trim()) {
-              errors.push(`${qWhere}.fields[${fi}].label_fr must be a non-empty string`);
-            }
-          });
-        }
-      } else if (Object.prototype.hasOwnProperty.call(q, 'fields')) {
-        errors.push(`${qWhere}.fields must only appear on form questions`);
+      if (Object.prototype.hasOwnProperty.call(q, 'fields')) {
+        errors.push(`${qWhere}.fields is not allowed; writing answers are free text`);
       }
       if (q.type === 'choice') {
         if (!Array.isArray(q.options) || q.options.length === 0) {
@@ -1056,22 +1056,48 @@ function validateWorksheet(value) {
     });
 
     if (section.id === 'writing' && Array.isArray(section.questions)) {
-      const questions = section.questions;
-      const formCount = questions.filter(
-        (q) => q && typeof q === 'object' && !Array.isArray(q) && q.type === 'form'
-      ).length;
-      const hasShortText = questions.some(
-        (q) => q && typeof q === 'object' && !Array.isArray(q) && q.type === 'short_text'
-      );
-      if (formCount !== 1 || !hasShortText) {
+      if (section.questions.length !== WRITING_QUESTION_COUNT) {
         errors.push(
-          `${where}.questions must contain exactly one "form" question and at least one "short_text" question for the writing section`
+          `${where}.questions must contain exactly ${WRITING_QUESTION_COUNT} questions for the writing section`
         );
       }
     }
   });
 
   return { ok: errors.length === 0, errors };
+}
+
+// Rating scale for a free-response question. Multiple-choice questions are not
+// rated (null). The last writing question (the short message/letter/SMS task)
+// is out of 10; every other rated question is out of 5. Legacy `form`
+// questions always stay out of 5, even when they were the last writing item.
+function ratingMaxForQuestion(section, question, index, total) {
+  if (!question || typeof question !== 'object' || Array.isArray(question)) return null;
+  const type = question.type;
+  if (!RATED_QUESTION_TYPES.includes(type)) return null;
+  if (type === 'form') return 5;
+  const sectionId = section && typeof section === 'object' && typeof section.id === 'string' ? section.id : '';
+  const count = Number.isInteger(total) && total > 0 ? total : 0;
+  if (sectionId === 'writing' && count > 0 && Number.isInteger(index) && index === count - 1) {
+    return 10;
+  }
+  return 5;
+}
+
+function buildRatingMaxMap(worksheet) {
+  const map = new Map();
+  const sections = worksheet && Array.isArray(worksheet.sections) ? worksheet.sections : [];
+  for (const section of sections) {
+    if (!section || typeof section !== 'object' || Array.isArray(section)) continue;
+    const questions = Array.isArray(section.questions) ? section.questions : [];
+    const total = questions.length;
+    questions.forEach((question, index) => {
+      if (!question || typeof question !== 'object' || Array.isArray(question)) return;
+      if (typeof question.id !== 'string') return;
+      map.set(question.id, ratingMaxForQuestion(section, question, index, total));
+    });
+  }
+  return map;
 }
 
 // Compute a stable cache key from the script and speaker voices. The same
@@ -1145,8 +1171,10 @@ function formatAnswerForPrompt(question, value) {
   return parts.join(' ; ');
 }
 
-function buildFeedbackPrompt(worksheet, answersMap) {
+function buildFeedbackPrompt(worksheet, answersMap, ratingMaxByQuestionId) {
   const sections = (worksheet && worksheet.sections) || [];
+  const ratingMax =
+    ratingMaxByQuestionId instanceof Map ? ratingMaxByQuestionId : buildRatingMaxMap(worksheet);
   const lines = [];
   lines.push(`You are correcting an A1 French worksheet. Topic: "${(worksheet && worksheet.topic) || 'unknown'}".`);
   lines.push('');
@@ -1162,9 +1190,11 @@ function buildFeedbackPrompt(worksheet, answersMap) {
     for (const q of section.questions || []) {
       const raw = Object.prototype.hasOwnProperty.call(answersMap, q.id) ? answersMap[q.id] : '';
       const original = formatAnswerForPrompt(q, raw);
+      const max = ratingMax.get(q.id);
       lines.push(`- question_id: ${q.id}`);
       lines.push(`  prompt: ${q.prompt}`);
       lines.push(`  expected answer: ${q.answer}`);
+      lines.push(`  max_score: ${max == null ? 'none' : max}`);
       lines.push(`  learner answer: ${original}`);
     }
     lines.push('');
@@ -1172,11 +1202,15 @@ function buildFeedbackPrompt(worksheet, answersMap) {
   lines.push('Return ONLY a single valid JSON object with this shape:');
   lines.push('{');
   lines.push('  "answers": [');
-  lines.push('    { "question_id": "string", "original": "the learner answer, copied exactly", "verdict": "correct|mistake|alternative", "correction": "string", "explanation": "string", "error_type": "error|style|alternative" }');
+  lines.push('    { "question_id": "string", "original": "the learner answer, copied exactly", "verdict": "correct|mistake|alternative", "correction": "string", "explanation": "string", "error_type": "error|style|alternative", "score": 4, "max_score": 5 }');
   lines.push('  ],');
   lines.push('  "summary": { "strengths": ["..."], "recurring_mistakes": ["..."], "priorities": ["..."], "follow_up": "string" }');
   lines.push('}');
-  lines.push('Rules: verdict must be one of correct|mistake|alternative. error_type must be one of error|style|alternative. Copy each learner answer into "original" exactly as given. For a form question, the learner answer is already formatted as "Label : valeur ; Label : valeur". Write every correction, explanation and summary item in French only — never English. Be encouraging and concise.');
+  lines.push('Scoring rubric for rated free-response questions (the rating is independent of the verdict):');
+  lines.push('- 5 points: 5 fully correct and natural; 4 a minor error; 3 several errors but understandable; 2 major errors or partly unclear; 1 off-topic, blank or incomprehensible.');
+  lines.push('- 10 points: 9–10 excellent; 7–8 good; 5–6 understandable with errors; 3–4 major errors; 1–2 very poor or blank.');
+  lines.push('A blank answer gets 1. An "alternative" answer can still score 4/5. A "correct" answer should normally get the maximum.');
+  lines.push('Rules: verdict must be one of correct|mistake|alternative. error_type must be one of error|style|alternative. Copy each learner answer into "original" exactly as given. For each question, the "max_score" line gives the maximum: when it is 5 or 10, return an integer "score" from 1 to that maximum and copy the given "max_score" exactly; when it is "none", omit both "score" and "max_score". For a form question, the learner answer is already formatted as "Label : valeur ; Label : valeur". Write every correction, explanation and summary item in French only — never English. Be encouraging and concise.');
   return lines.join('\n');
 }
 
@@ -1184,14 +1218,38 @@ function buildFeedbackRepairPrompt(errors) {
   return `Your previous feedback response was rejected because:
 - ${(errors || ['unknown error']).join('\n- ')}
 
-Return the corrected feedback as a SINGLE valid JSON object only. Use only the exact verdict and error_type values allowed. No commentary. Écris toutes les corrections, explications et le bilan en français.`;
+Return the corrected feedback as a SINGLE valid JSON object only. Return exactly one answer per worksheet question, in worksheet order, including blank answers, with no unknown or duplicate ids. Use only the exact verdict and error_type values allowed. For every rated question, return a valid integer "score" and copy its exact "max_score" (5 or 10); multiple-choice ratings are ignored and stripped. A blank answer must be "verdict": "mistake", "error_type": "error", "score": 1 for a rated question, and the exact expected "max_score"; choice answers omit scores. No commentary. Écris toutes les corrections, explications et le bilan en français.`;
 }
 
-function validateFeedback(value) {
+function validateFeedback(value, { ratingMaxByQuestionId } = {}) {
   const errors = [];
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { ok: false, errors: ['feedback must be a JSON object'] };
   }
+  const hasRatingMap = ratingMaxByQuestionId instanceof Map;
+  const seenQuestionIds = new Set();
+
+  const validateScorePair = (where, answer) => {
+    const hasScore = Object.prototype.hasOwnProperty.call(answer, 'score');
+    const hasMaxScore = Object.prototype.hasOwnProperty.call(answer, 'max_score');
+    if (!hasScore && !hasMaxScore) return;
+    if (!hasScore || !hasMaxScore) {
+      errors.push(`${where}.score and ${where}.max_score must be provided together`);
+      return;
+    }
+    const scoreIsInt = Number.isInteger(answer.score);
+    const maxIsInt = Number.isInteger(answer.max_score);
+    if (!scoreIsInt) errors.push(`${where}.score must be an integer`);
+    if (!maxIsInt) {
+      errors.push(`${where}.max_score must be an integer`);
+    } else if (answer.max_score !== 5 && answer.max_score !== 10) {
+      errors.push(`${where}.max_score must be 5 or 10`);
+    }
+    if (scoreIsInt && maxIsInt && (answer.score < 1 || answer.score > answer.max_score)) {
+      errors.push(`${where}.score must be between 1 and ${where}.max_score`);
+    }
+  };
+
   if (!Array.isArray(value.answers)) {
     errors.push('answers must be an array');
   } else {
@@ -1201,7 +1259,8 @@ function validateFeedback(value) {
         errors.push(`${where} must be an object`);
         return;
       }
-      if (typeof a.question_id !== 'string' || !a.question_id.trim()) errors.push(`${where}.question_id must be a non-empty string`);
+      const questionId = typeof a.question_id === 'string' ? a.question_id.trim() : '';
+      if (!questionId) errors.push(`${where}.question_id must be a non-empty string`);
       if (typeof a.original !== 'string') errors.push(`${where}.original must be a string`);
       if (!FEEDBACK_VERDICTS.includes(a.verdict)) errors.push(`${where}.verdict must be one of ${FEEDBACK_VERDICTS.join(' | ')}`);
       if (typeof a.correction !== 'string' || !a.correction.trim()) errors.push(`${where}.correction must be a non-empty string`);
@@ -1209,8 +1268,55 @@ function validateFeedback(value) {
       if (!FEEDBACK_ERROR_TYPES.includes(a.error_type)) {
         errors.push(`${where}.error_type must be one of ${FEEDBACK_ERROR_TYPES.join(' | ')}`);
       }
+
+      const hasScore = Object.prototype.hasOwnProperty.call(a, 'score');
+      const hasMaxScore = Object.prototype.hasOwnProperty.call(a, 'max_score');
+
+      if (!hasRatingMap) {
+        // Generic, optional pair validation when no worksheet map is supplied.
+        validateScorePair(where, a);
+        return;
+      }
+
+      if (!questionId) return;
+      if (!ratingMaxByQuestionId.has(questionId)) {
+        errors.push(`${where}.question_id is not present in the worksheet`);
+        return;
+      }
+      if (seenQuestionIds.has(questionId)) {
+        errors.push(`${where}.question_id duplicates another answer (${questionId})`);
+        return;
+      }
+      seenQuestionIds.add(questionId);
+
+      const expected = ratingMaxByQuestionId.get(questionId);
+      // Choice questions are unrated: ignore any model-supplied score fields
+      // here. The route strips them from the response.
+      if (expected === null) return;
+
+      if (!hasScore || !hasMaxScore) {
+        errors.push(`${where}.score and ${where}.max_score are required for a rated question`);
+        if (hasScore || hasMaxScore) validateScorePair(where, a);
+        return;
+      }
+      validateScorePair(where, a);
+      if (a.max_score !== expected) {
+        errors.push(`${where}.max_score must be ${expected}`);
+      }
+      if (Number.isInteger(a.score) && (a.score < 1 || a.score > expected)) {
+        errors.push(`${where}.score must be between 1 and ${expected}`);
+      }
     });
+
+    if (hasRatingMap) {
+      for (const id of ratingMaxByQuestionId.keys()) {
+        if (!seenQuestionIds.has(id)) {
+          errors.push(`answers must contain exactly one answer for every worksheet question (missing: ${id})`);
+        }
+      }
+    }
   }
+
   const summary = value.summary;
   if (!summary || typeof summary !== 'object' || Array.isArray(summary)) {
     errors.push('summary must be an object');
@@ -1529,8 +1635,58 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
       return res.status(400).json({ error: { message: 'worksheet.sections must be an array' } });
     }
     const answersMap = normalizeAnswers(body.answers);
-    const userPrompt = buildFeedbackPrompt(worksheet, answersMap);
+    const ratingMaxByQuestionId = buildRatingMaxMap(worksheet);
+    const userPrompt = buildFeedbackPrompt(worksheet, answersMap, ratingMaxByQuestionId);
     const timeoutMs = Number(env.AI_TIMEOUT_MS) || 45000;
+    const questionById = new Map();
+    for (const section of worksheet.sections) {
+      const questions = section && Array.isArray(section.questions) ? section.questions : [];
+      for (const q of questions) {
+        if (q && typeof q.id === 'string') questionById.set(q.id, q);
+      }
+    }
+
+    // Overwrite model-supplied originals with the real learner answers and
+    // blank-normalize known rows before validation. Unknown, duplicate and
+    // missing ids are intentionally left alone so validation still rejects
+    // them. The same helper is reused after validation with `final: true` to
+    // enforce the server-computed max and choice score stripping.
+    const normalizeFeedbackRow = (a, { final = false } = {}) => {
+      if (!a || typeof a !== 'object' || Array.isArray(a)) return a;
+      const id = typeof a.question_id === 'string' ? a.question_id.trim() : '';
+      if (!id || !ratingMaxByQuestionId.has(id)) return a;
+      const hasAnswer = Object.prototype.hasOwnProperty.call(answersMap, id);
+      const raw = hasAnswer ? answersMap[id] : '';
+      const original = formatAnswerForPrompt(questionById.get(id), raw);
+      const next = Object.assign({}, a, { question_id: id, original });
+      const expected = ratingMaxByQuestionId.get(id);
+      if (!original.trim()) {
+        next.verdict = 'mistake';
+        next.error_type = 'error';
+        if (expected === null) {
+          delete next.score;
+          delete next.max_score;
+        } else if (expected === 5 || expected === 10) {
+          next.score = 1;
+          next.max_score = expected;
+        }
+        return next;
+      }
+      if (final) {
+        if (expected === null) {
+          delete next.score;
+          delete next.max_score;
+        } else if (expected === 5 || expected === 10) {
+          next.max_score = expected;
+        }
+      }
+      return next;
+    };
+    const normalizeFeedbackValue = (value) => {
+      if (!value || !Array.isArray(value.answers)) return value;
+      value.answers = value.answers.map((answer) => normalizeFeedbackRow(answer));
+      return value;
+    };
 
     try {
       const first = await provider.chatCompletion({
@@ -1541,7 +1697,10 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
       });
 
       let parsed = extractJson(first.text);
-      let check = parsed ? validateFeedback(parsed) : { ok: false, errors: ['response was not valid JSON'] };
+      if (parsed) parsed = normalizeFeedbackValue(parsed);
+      let check = parsed
+        ? validateFeedback(parsed, { ratingMaxByQuestionId })
+        : { ok: false, errors: ['response was not valid JSON'] };
 
       if (!check.ok) {
         const repaired = await provider.chatCompletion({
@@ -1555,7 +1714,10 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
           timeoutMs
         });
         parsed = extractJson(repaired.text);
-        check = parsed ? validateFeedback(parsed) : { ok: false, errors: ['repair response was not valid JSON'] };
+        if (parsed) parsed = normalizeFeedbackValue(parsed);
+        check = parsed
+          ? validateFeedback(parsed, { ratingMaxByQuestionId })
+          : { ok: false, errors: ['repair response was not valid JSON'] };
         if (!check.ok) {
           console.error('[feedback] invalid feedback after repair:', check.errors);
           return res.status(502).json({
@@ -1564,22 +1726,25 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
         }
       }
 
-      // Never let the model rewrite the learner's original answer. Form answers
-      // are serialized here so `original` is always a readable string.
-      const questionById = new Map();
-      for (const section of worksheet.sections) {
-        for (const q of (section && Array.isArray(section.questions) ? section.questions : [])) {
-          if (q && typeof q.id === 'string') questionById.set(q.id, q);
-        }
+      // Never let the model rewrite or fabricate the learner's answer. Filter
+      // to known worksheet ids, de-duplicate with the last entry winning, then
+      // rebuild in worksheet order so every question has exactly one row.
+      // Ratings are server-authoritative: choice/unrated entries lose any
+      // scores; rated entries always carry the expected maximum and a blank
+      // answer is forced to 1 point.
+      const answerById = new Map();
+      for (const a of parsed.answers) {
+        const id = typeof a.question_id === 'string' ? a.question_id.trim() : '';
+        if (!id || !ratingMaxByQuestionId.has(id)) continue;
+        answerById.set(id, a);
       }
-      parsed.answers = parsed.answers.map((a) => {
-        if (Object.prototype.hasOwnProperty.call(answersMap, a.question_id)) {
-          return Object.assign({}, a, {
-            original: formatAnswerForPrompt(questionById.get(a.question_id), answersMap[a.question_id])
-          });
-        }
-        return a;
-      });
+      const rows = [];
+      for (const [id] of ratingMaxByQuestionId) {
+        const entry = answerById.get(id);
+        if (!entry) continue;
+        rows.push(normalizeFeedbackRow(entry, { final: true }));
+      }
+      parsed.answers = rows;
 
       res.json(parsed);
     } catch (err) {
@@ -1804,6 +1969,10 @@ module.exports = {
   WORKSHEET_SECTION_IDS,
   WORKSHEET_SYSTEM_PROMPT,
   QUESTION_TYPES,
+  WRITING_QUESTION_COUNT,
+  RATED_QUESTION_TYPES,
+  ratingMaxForQuestion,
+  buildRatingMaxMap,
   FEEDBACK_VERDICTS,
   FEEDBACK_ERROR_TYPES,
   MAX_TTS_CHARS

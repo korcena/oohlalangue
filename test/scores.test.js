@@ -68,9 +68,9 @@ test('scoreFromFeedback: all correct scores 100', async () => {
   assert.deepEqual(
     scores.scoreFromFeedback(
       feedback([
-        { question_id: 'q1', verdict: 'correct', original: 'un café' },
-        { question_id: 'q2', verdict: 'correct', original: 'à Paris' },
-        { question_id: 'q3', verdict: 'correct', original: 'trois' }
+        { question_id: 'q1', verdict: 'correct', original: 'un café', score: 5, max_score: 5 },
+        { question_id: 'q2', verdict: 'correct', original: 'à Paris', score: 5, max_score: 5 },
+        { question_id: 'q3', verdict: 'correct', original: 'trois', score: 5, max_score: 5 }
       ])
     ),
     { correct: 3, total: 3, score: 100 }
@@ -82,7 +82,9 @@ test('scoreFromFeedback: all mistake scores 0', async () => {
   const list = ['q1', 'q2', 'q3'].map((q) => ({
     question_id: q,
     verdict: 'mistake',
-    original: 'mauvaise réponse'
+    original: 'mauvaise réponse',
+    score: 2,
+    max_score: 5
   }));
   assert.deepEqual(scores.scoreFromFeedback(feedback(list)), { correct: 0, total: 3, score: 0 });
 });
@@ -90,9 +92,9 @@ test('scoreFromFeedback: all mistake scores 0', async () => {
 test('scoreFromFeedback: alternative counts as correct', async () => {
   const { scores } = await loadModules();
   const list = [
-    { question_id: 'q1', verdict: 'correct', original: 'un café' },
-    { question_id: 'q2', verdict: 'alternative', original: 'un thé' },
-    { question_id: 'q3', verdict: 'mistake', original: 'du lait' }
+    { question_id: 'q1', verdict: 'correct', original: 'un café', score: 5, max_score: 5 },
+    { question_id: 'q2', verdict: 'alternative', original: 'un thé', score: 4, max_score: 5 },
+    { question_id: 'q3', verdict: 'mistake', original: 'du lait', score: 2, max_score: 5 }
   ];
   assert.deepEqual(scores.scoreFromFeedback(feedback(list)), { correct: 2, total: 3, score: 67 });
 });
@@ -103,7 +105,9 @@ test('scoreFromFeedback: rounds to the nearest integer', async () => {
     Array.from({ length: total }, (_, i) => ({
       question_id: `q${i}`,
       verdict: i < correct ? 'correct' : 'mistake',
-      original: 'réponse'
+      original: 'réponse',
+      score: i < correct ? 5 : 2,
+      max_score: 5
     }));
 
   assert.equal(scores.scoreFromFeedback(feedback(mk(2, 3))).score, 67);
@@ -124,10 +128,10 @@ test('scoreFromFeedback: zero graded answers is a zero score', async () => {
 test('scoreFromFeedback: unknown verdicts and missing question_id are ignored', async () => {
   const { scores } = await loadModules();
   const list = [
-    { question_id: 'q1', verdict: 'bogus', original: 'réponse' },
-    { question_id: '', verdict: 'correct', original: 'réponse' },
-    { verdict: 'correct', original: 'réponse' },
-    { question_id: 'q2', verdict: 'correct', original: 'réponse' }
+    { question_id: 'q1', verdict: 'bogus', original: 'réponse', score: 4, max_score: 5 },
+    { question_id: '', verdict: 'correct', original: 'réponse', score: 5, max_score: 5 },
+    { verdict: 'correct', original: 'réponse', score: 5, max_score: 5 },
+    { question_id: 'q2', verdict: 'correct', original: 'réponse', score: 5, max_score: 5 }
   ];
   assert.deepEqual(scores.scoreFromFeedback(feedback(list)), { correct: 1, total: 1, score: 100 });
 });
@@ -135,10 +139,10 @@ test('scoreFromFeedback: unknown verdicts and missing question_id are ignored', 
 test('scoreFromFeedback: a blank original is not a graded answer', async () => {
   const { scores } = await loadModules();
   const list = [
-    { question_id: 'q1', verdict: 'correct', original: 'un café' },
-    { question_id: 'q2', verdict: 'mistake', original: '   ' },
-    { question_id: 'q3', verdict: 'mistake' },
-    { question_id: 'q4', verdict: 'mistake', original: '' }
+    { question_id: 'q1', verdict: 'correct', original: 'un café', score: 5, max_score: 5 },
+    { question_id: 'q2', verdict: 'mistake', original: '   ', score: 1, max_score: 5 },
+    { question_id: 'q3', verdict: 'mistake', score: 1, max_score: 5 },
+    { question_id: 'q4', verdict: 'mistake', original: '', score: 1, max_score: 5 }
   ];
   assert.deepEqual(scores.scoreFromFeedback(feedback(list)), { correct: 1, total: 1, score: 100 });
 });
@@ -148,7 +152,9 @@ test('scoreFromFeedback: an all-blank payload records nothing', async () => {
   const list = ['q1', 'q2', 'q3'].map((q) => ({
     question_id: q,
     verdict: 'mistake',
-    original: '  \t '
+    original: '  \t ',
+    score: 1,
+    max_score: 5
   }));
   assert.deepEqual(scores.scoreFromFeedback(feedback(list)), { correct: 0, total: 0, score: 0 });
 });
@@ -156,10 +162,153 @@ test('scoreFromFeedback: an all-blank payload records nothing', async () => {
 test('scoreFromFeedback: a filled form counts once and an empty form is ignored', async () => {
   const { scores } = await loadModules();
   const list = [
-    { question_id: 'w1', verdict: 'correct', original: 'Nom : Durand ; Prénom : Marie' },
-    { question_id: 'w2', verdict: 'mistake', original: '' }
+    { question_id: 'w1', verdict: 'correct', original: 'Nom : Durand ; Prénom : Marie', score: 5, max_score: 5 },
+    { question_id: 'w2', verdict: 'mistake', original: '', score: 1, max_score: 5 }
   ];
   assert.deepEqual(scores.scoreFromFeedback(feedback(list)), { correct: 1, total: 1, score: 100 });
+});
+
+// -- pointsFromFeedback ------------------------------------------------------
+
+test('pointsFromFeedback sums valid 5- and 10-point ratings', async () => {
+  const { scores } = await loadModules();
+  const list = [
+    { question_id: 'w1', verdict: 'correct', original: 'x', score: 4, max_score: 5 },
+    { question_id: 'w4', verdict: 'correct', original: 'y', score: 7, max_score: 10 },
+    { question_id: 'c1', verdict: 'correct', original: 'a' }
+  ];
+  assert.deepEqual(scores.pointsFromFeedback(feedback(list)), {
+    points: 11,
+    max: 15,
+    count: 2
+  });
+});
+
+test('pointsFromFeedback ignores invalid ratings and counts a blank 1', async () => {
+  const { scores } = await loadModules();
+  const list = [
+    { question_id: 'q1', score: 1, max_score: 5 },
+    { question_id: 'q2', score: 0, max_score: 5 },
+    { question_id: 'q3', score: 6, max_score: 5 },
+    { question_id: 'q4', score: 4, max_score: 7 },
+    { question_id: 'q5', score: '4', max_score: 5 },
+    { question_id: 'q6', score: 4, max_score: '5' },
+    { question_id: 'q7', score: 4.5, max_score: 5 },
+    {},
+    null,
+    'x',
+    { question_id: 'q9', score: 5, max_score: 10 }
+  ];
+  assert.deepEqual(scores.pointsFromFeedback(feedback(list)), {
+    points: 6,
+    max: 15,
+    count: 2
+  });
+});
+
+test('pointsFromFeedback ignores entries without a non-empty question_id', async () => {
+  const { scores } = await loadModules();
+  const list = [
+    { score: 5, max_score: 5 },
+    { question_id: '   ', score: 5, max_score: 5 },
+    { question_id: 42, score: 5, max_score: 5 },
+    { question_id: 'q1', score: 4, max_score: 5 }
+  ];
+  assert.deepEqual(scores.pointsFromFeedback(feedback(list)), {
+    points: 4,
+    max: 5,
+    count: 1
+  });
+});
+
+test('pointsFromFeedback de-duplicates by question_id with the last entry winning', async () => {
+  const { scores } = await loadModules();
+  const list = [
+    { question_id: 'q1', score: 5, max_score: 5 },
+    { question_id: 'q2', score: 5, max_score: 5 },
+    { question_id: 'q1', score: 3, max_score: 5 }
+  ];
+  assert.deepEqual(scores.pointsFromFeedback(feedback(list)), {
+    points: 8,
+    max: 10,
+    count: 2
+  });
+});
+
+test('pointsFromFeedback filters unknown ids when a worksheet or id set is passed', async () => {
+  const { scores } = await loadModules();
+  const list = [
+    { question_id: 'q1', score: 4, max_score: 5 },
+    { question_id: 'stale', score: 5, max_score: 5 }
+  ];
+  const worksheet = {
+    sections: [{ id: 'reading', questions: [{ id: 'q1' }] }]
+  };
+  assert.deepEqual(scores.pointsFromFeedback(feedback(list), worksheet), {
+    points: 4,
+    max: 5,
+    count: 1
+  });
+  assert.deepEqual(scores.pointsFromFeedback(feedback(list), new Set(['q1'])), {
+    points: 4,
+    max: 5,
+    count: 1
+  });
+  assert.deepEqual(scores.pointsFromFeedback(feedback(list), ['q1']), {
+    points: 4,
+    max: 5,
+    count: 1
+  });
+});
+
+test('pointsFromFeedback is fail-open on corrupt input', async () => {
+  const { scores } = await loadModules();
+  const empty = { points: 0, max: 0, count: 0 };
+  for (const value of [null, undefined, 42, 'x', [], {}, { answers: 'nope' }, { answers: [null, 3] }]) {
+    assert.doesNotThrow(() => scores.pointsFromFeedback(value));
+    assert.deepEqual(scores.pointsFromFeedback(value), empty);
+  }
+});
+
+test('pointsFromFeedback skips choice questions when a worksheet is supplied', async () => {
+  const { scores } = await loadModules();
+  const list = [
+    { question_id: 'q1', score: 4, max_score: 5 },
+    { question_id: 'choice1', score: 5, max_score: 5 }
+  ];
+  const worksheet = {
+    sections: [
+      {
+        id: 'reading',
+        questions: [
+          { id: 'q1', prompt: 'p', type: 'short_text' },
+          { id: 'choice1', prompt: 'p', type: 'choice', options: ['a', 'b'] }
+        ]
+      }
+    ]
+  };
+  assert.deepEqual(scores.pointsFromFeedback(feedback(list), worksheet), {
+    points: 4,
+    max: 5,
+    count: 1
+  });
+});
+
+test('ratings do not affect the verdict-based scoreFromFeedback', async () => {
+  const { scores } = await loadModules();
+  const mistake = scores.scoreFromFeedback(
+    feedback([
+      { question_id: 'w1', verdict: 'mistake', original: 'réponse', score: 5, max_score: 5 }
+    ])
+  );
+  assert.deepEqual(mistake, { correct: 0, total: 1, score: 0 });
+
+  const alternative = scores.scoreFromFeedback(
+    feedback([
+      { question_id: 'w1', verdict: 'alternative', original: 'réponse', score: 1, max_score: 5 }
+    ])
+  );
+  assert.deepEqual(alternative, { correct: 1, total: 1, score: 100 });
 });
 
 // -- 7-8: worksheetIdentity -------------------------------------------------

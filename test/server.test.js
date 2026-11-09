@@ -14,6 +14,7 @@ const {
   buildSystemPrompt,
   buildWorksheetPrompt,
   buildFeedbackPrompt,
+  buildFeedbackRepairPrompt,
   normalizeWorksheet,
   normalizeAnswers,
   formatAnswerForPrompt,
@@ -572,59 +573,56 @@ test('POST /api/generate de-duplicates repeated question ids without a repair ca
   });
 });
 
-test('POST /api/generate keeps form fields in the normalized response', async () => {
-  const formWorksheet = {
-    topic: 'À l’hôtel',
+test('POST /api/generate accepts four short_text writing questions and keeps their prompts', async () => {
+  const writingPrompts = [
+    'Quelle est ta saison préférée ? Réponds en une ou deux phrases complètes.',
+    'Que fais-tu le week-end ? Réponds en une ou deux phrases complètes.',
+    'Décris ta chambre en une ou deux phrases complètes.',
+    'Écris un court SMS pour inviter ton ami à dîner (environ 40–50 mots).'
+  ];
+  const writingWorksheet = {
+    topic: 'Expression écrite',
     level: 'A1',
     sections: [
       {
         id: 'writing',
         title_fr: 'Expression écrite',
         topic_fr: 'La Nourriture',
-        instructions_fr: 'Complète la fiche et réponds au message.',
-        questions: [
-          {
-            id: 'w1',
-            prompt: 'Tu arrives à l’hôtel. Complète ta fiche d’inscription.',
-            type: 'form',
-            fields: [
-              { label_fr: 'Nom' },
-              { label_fr: 'Prénom' },
-              { label_fr: 'Nationalité' },
-              { label_fr: 'Date d’arrivée' },
-              { label_fr: 'Date de départ' }
-            ],
-            answer: 'Nom : Durand ; Prénom : Marie ; Nationalité : française.',
-            explanation: 'On écrit les informations personnelles et les dates du séjour.'
-          },
-          {
-            id: 'w2',
-            prompt: 'Ton ami t’invite à dîner. Réponds en environ 40–50 mots.',
-            type: 'short_text',
-            answer: 'Merci pour ton invitation ! Je viens avec plaisir.',
-            explanation: 'La réponse accepte l’invitation.'
-          }
-        ]
+        instructions_fr:
+          'Réponds aux 3 premières questions en une ou deux phrases complètes, puis écris un message de 40 à 50 mots pour la dernière question.',
+        questions: writingPrompts.map((prompt, index) => ({
+          id: `w${index + 1}`,
+          prompt,
+          type: 'short_text',
+          answer: 'Ma réponse modèle en une ou deux phrases.',
+          explanation: 'On répond avec des phrases complètes.'
+        }))
       }
     ]
   };
   const fetchImpl = makeFetchMock(() =>
-    jsonResponse(200, { message: { content: JSON.stringify(formWorksheet) } })
+    jsonResponse(200, { message: { content: JSON.stringify(writingWorksheet) } })
   );
   const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
   await withServer(app, async (base) => {
     const res = await fetch(`${base}/api/generate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ topic: 'À l’hôtel', includeListening: false })
+      body: JSON.stringify({ topic: 'Expression écrite', includeListening: false })
     });
     assert.equal(res.status, 200);
     const body = await res.json();
     const writing = body.sections.find((section) => section.id === 'writing');
-    const form = writing.questions.find((question) => question.type === 'form');
-    assert.ok(form, 'the form question survives normalization');
-    assert.deepEqual(form.fields, formWorksheet.sections[0].questions[0].fields);
-    assert.equal(body.sections[0].questions[1].type, 'short_text');
+    assert.equal(writing.questions.length, 4);
+    assert.ok(writing.questions.every((question) => question.type === 'short_text'));
+    assert.ok(
+      writing.questions.every((question) => !Object.prototype.hasOwnProperty.call(question, 'fields')),
+      'generated writing questions must never carry fields'
+    );
+    assert.deepEqual(
+      writing.questions.map((question) => question.prompt),
+      writingPrompts
+    );
   });
 });
 
@@ -852,11 +850,16 @@ test('worksheet prompts encode the DELF A1 contract', () => {
   assert.match(WORKSHEET_SYSTEM_PROMPT, /inference|inferred/i);
   assert.match(WORKSHEET_SYSTEM_PROMPT, /topic_fr/);
   assert.match(WORKSHEET_SYSTEM_PROMPT, /short_text/);
-  assert.match(WORKSHEET_SYSTEM_PROMPT, /"form"/);
-  assert.match(WORKSHEET_SYSTEM_PROMPT, /"fields"/);
-  assert.match(WORKSHEET_SYSTEM_PROMPT, /label_fr/);
-  assert.match(WORKSHEET_SYSTEM_PROMPT, /5–8/);
-  assert.match(WORKSHEET_SYSTEM_PROMPT, /EXACTLY TWO/);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /EXACTLY 4 "short_text"/);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /The first 3 questions MUST be answered in one or two complete French sentences/);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /The LAST writing question MUST be the short communicative message/);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /Réponds aux 3 premières questions en une ou deux phrases complètes, puis écris un message de 40 à 50 mots pour la dernière question\./);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /one or two complete French sentences/);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /NEVER ask for identity or contact details/);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /Do not use type "form"/);
+  assert.match(WORKSHEET_SYSTEM_PROMPT, /The LAST writing question MUST be/);
+  assert.doesNotMatch(WORKSHEET_SYSTEM_PROMPT, /"type": "[^"]*form/);
+  assert.doesNotMatch(WORKSHEET_SYSTEM_PROMPT, /"fields":/);
   assert.match(WORKSHEET_SYSTEM_PROMPT, /Narratrice/);
   assert.match(WORKSHEET_SYSTEM_PROMPT, /non sequiturs/);
   assert.match(WORKSHEET_SYSTEM_PROMPT, /2–4 turns/);
@@ -883,9 +886,15 @@ test('worksheet prompts encode the DELF A1 contract', () => {
   assert.match(prompt, /short_text/);
   assert.match(prompt, /topic_fr/);
   assert.match(prompt, /French only/);
-  assert.match(prompt, /type "form"/);
-  assert.match(prompt, /5–8 "fields"/);
-  assert.match(prompt, /label_fr/);
+  assert.match(prompt, /Exactly 4 "short_text"/);
+  assert.match(prompt, /The first 3 questions MUST be answered in one or two complete French sentences/);
+  assert.match(prompt, /The LAST writing question MUST be the short communicative message/);
+  assert.match(prompt, /Réponds aux 3 premières questions en une ou deux phrases complètes, puis écris un message de 40 à 50 mots pour la dernière question\./);
+  assert.match(prompt, /one or two complete French sentences/);
+  assert.match(prompt, /NEVER ask for identity or contact details/);
+  assert.match(prompt, /Do not use type "form"/);
+  assert.match(prompt, /The LAST writing question MUST be/);
+  assert.match(prompt, /never include a "fields" array/);
   assert.match(prompt, /2–4 turns/);
   assert.match(prompt, /2–4 turns for a dialogue/);
   assert.match(prompt, /single-speaker message is one turn/);
@@ -994,7 +1003,9 @@ test('POST /api/feedback validates shape and preserves the original answer', asy
         verdict: 'mistake',
         correction: 'Je vais au café.',
         explanation: 'Use aller + au.',
-        error_type: 'error'
+        error_type: 'error',
+        score: 4,
+        max_score: 5
       }
     ],
     summary: { strengths: ['good effort'], recurring_mistakes: [], priorities: ['aller'], follow_up: 'Write 3 sentences.' }
@@ -1013,6 +1024,8 @@ test('POST /api/feedback validates shape and preserves the original answer', asy
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.answers[0].original, 'Je vais au cafe');
+    assert.equal(body.answers[0].score, 4);
+    assert.equal(body.answers[0].max_score, 5);
   });
 });
 
@@ -1025,7 +1038,9 @@ test('POST /api/feedback formats a form answer object into a readable original s
         verdict: 'correct',
         correction: 'Nom : Durand ; Prénom : Marie.',
         explanation: 'Les informations sont correctes.',
-        error_type: 'style'
+        error_type: 'style',
+        score: 5,
+        max_score: 5
       }
     ],
     summary: { strengths: [], recurring_mistakes: [], priorities: [], follow_up: 'next' }
@@ -1067,10 +1082,335 @@ test('POST /api/feedback formats a form answer object into a readable original s
   });
 });
 
+function ratingRouteWorksheet() {
+  return {
+    topic: 'Notation',
+    sections: [
+      {
+        id: 'reading',
+        title_fr: 'Lis',
+        instructions_fr: 'e',
+        text_fr: 'Un texte.',
+        questions: [
+          { id: 'r1', prompt: 'p', type: 'short_text', answer: 'a', explanation: 'x' },
+          { id: 'c1', prompt: 'p', type: 'choice', options: ['a', 'b', 'c'], answer: 'a', explanation: 'x' }
+        ]
+      },
+      {
+        id: 'writing',
+        title_fr: 'Écris',
+        instructions_fr: 'e',
+        questions: [
+          { id: 'w1', prompt: 'p1', type: 'short_text', answer: 'a', explanation: 'x' },
+          { id: 'w2', prompt: 'p2', type: 'short_text', answer: 'a', explanation: 'x' },
+          { id: 'w3', prompt: 'p3', type: 'short_text', answer: 'a', explanation: 'x' },
+          { id: 'w4', prompt: 'p4', type: 'short_text', answer: 'a', explanation: 'x' }
+        ]
+      }
+    ]
+  };
+}
+
+function ratingRouteFeedback() {
+  return {
+    answers: [
+      { question_id: 'r1', original: 'a', verdict: 'correct', correction: 'a', explanation: 'x', error_type: 'style', score: 5, max_score: 5 },
+      { question_id: 'c1', original: 'a', verdict: 'correct', correction: 'a', explanation: 'x', error_type: 'style' },
+      { question_id: 'w1', original: 'a', verdict: 'correct', correction: 'a', explanation: 'x', error_type: 'style', score: 5, max_score: 5 },
+      { question_id: 'w2', original: 'a', verdict: 'correct', correction: 'a', explanation: 'x', error_type: 'style', score: 4, max_score: 5 },
+      { question_id: 'w3', original: 'a', verdict: 'correct', correction: 'a', explanation: 'x', error_type: 'style', score: 3, max_score: 5 },
+      { question_id: 'w4', original: 'a', verdict: 'correct', correction: 'a', explanation: 'x', error_type: 'style', score: 8, max_score: 10 }
+    ],
+    summary: { strengths: [], recurring_mistakes: [], priorities: [], follow_up: 'next' }
+  };
+}
+
+function ratingRouteAnswers() {
+  return { r1: 'a', c1: 'a', w1: 'a', w2: 'a', w3: 'a', w4: 'a' };
+}
+
+async function runFeedbackRepair(firstFeedback, secondFeedback, answers = ratingRouteAnswers()) {
+  let call = 0;
+  const fetchImpl = makeFetchMock(() => {
+    call += 1;
+    const payload = call === 1 ? firstFeedback : secondFeedback;
+    return jsonResponse(200, { message: { content: JSON.stringify(payload) } });
+  });
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
+  const outcome = await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ worksheet: ratingRouteWorksheet(), answers })
+    });
+    return { status: res.status, body: await res.json() };
+  });
+  return { ...outcome, calls: call };
+}
+
+test('POST /api/feedback repairs a missing, zero or over-max score', async () => {
+  const cases = [
+    (feedback) => {
+      delete feedback.answers[5].score;
+      delete feedback.answers[5].max_score;
+    },
+    (feedback) => {
+      feedback.answers[5].score = 0;
+    },
+    (feedback) => {
+      feedback.answers[5].score = 11;
+    }
+  ];
+  for (const mutate of cases) {
+    const first = ratingRouteFeedback();
+    mutate(first);
+    const outcome = await runFeedbackRepair(first, ratingRouteFeedback());
+    assert.equal(outcome.status, 200);
+    assert.equal(outcome.calls, 2, 'an invalid rating must trigger exactly one repair');
+    const w4 = outcome.body.answers.find((answer) => answer.question_id === 'w4');
+    assert.equal(w4.max_score, 10);
+    assert.equal(w4.score, 8, 'the repaired score must survive post-processing');
+  }
+});
+
+test('POST /api/feedback repairs a wrong max_score for the last writing question', async () => {
+  const first = ratingRouteFeedback();
+  first.answers[5].score = 5;
+  first.answers[5].max_score = 5;
+  const outcome = await runFeedbackRepair(first, ratingRouteFeedback());
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.calls, 2);
+  const w4 = outcome.body.answers.find((answer) => answer.question_id === 'w4');
+  assert.equal(w4.max_score, 10);
+  assert.equal(w4.score, 8);
+});
+
+test('POST /api/feedback repairs missing, unknown and duplicate answer ids', async () => {
+  const cases = [
+    (feedback) => {
+      feedback.answers = feedback.answers.filter((answer) => answer.question_id !== 'w2');
+    },
+    (feedback) => {
+      feedback.answers.push(
+        Object.assign({}, feedback.answers[2], { question_id: 'unknown' })
+      );
+    },
+    (feedback) => {
+      feedback.answers.push(
+        Object.assign({}, feedback.answers[2], { question_id: 'w1' })
+      );
+    }
+  ];
+  for (const mutate of cases) {
+    const first = ratingRouteFeedback();
+    mutate(first);
+    const outcome = await runFeedbackRepair(first, ratingRouteFeedback());
+    assert.equal(outcome.status, 200);
+    assert.equal(outcome.calls, 2, 'a set-completeness error must trigger one repair');
+    assert.equal(outcome.body.answers.length, 6, 'exactly one row per worksheet question');
+    assert.deepEqual(
+      outcome.body.answers.map((answer) => answer.question_id),
+      ['r1', 'c1', 'w1', 'w2', 'w3', 'w4'],
+      'answers are returned in worksheet order'
+    );
+  }
+});
+
+test('POST /api/feedback overwrites fabricated originals and makes blanks mistake/error with score 1', async () => {
+  const feedback = ratingRouteFeedback();
+  feedback.answers[2].original = 'FABRICATED ANSWER';
+  feedback.answers[2].score = 5;
+  feedback.answers[2].verdict = 'correct';
+  feedback.answers[5].original = 'FABRICATED MESSAGE';
+  feedback.answers[5].score = 8;
+  feedback.answers[5].verdict = 'correct';
+  const outcome = await runFeedbackRepair(feedback, feedback, {});
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.calls, 1, 'a valid response needs no repair');
+
+  const w1 = outcome.body.answers.find((answer) => answer.question_id === 'w1');
+  assert.equal(w1.original, '', 'the learner left this question untouched');
+  assert.equal(w1.score, 1, 'a model 5/5 blank is forced to 1');
+  assert.equal(w1.max_score, 5);
+  assert.equal(w1.verdict, 'mistake', 'a blank must never display Correct');
+  assert.equal(w1.error_type, 'error');
+
+  const w4 = outcome.body.answers.find((answer) => answer.question_id === 'w4');
+  assert.equal(w4.original, '');
+  assert.equal(w4.score, 1, 'the last writing question is also forced to 1 when blank');
+  assert.equal(w4.max_score, 10);
+  assert.equal(w4.verdict, 'mistake');
+  assert.equal(w4.error_type, 'error');
+
+  const choice = outcome.body.answers.find((answer) => answer.question_id === 'c1');
+  assert.equal(choice.original, '');
+  assert.equal(choice.verdict, 'mistake', 'blank choice rows are also mistake/error');
+  assert.equal(choice.error_type, 'error');
+  assert.equal(choice.score, undefined);
+  assert.equal(choice.max_score, undefined);
+
+  const { scoreFromFeedback } = await import('../public/lib/scores.js');
+  assert.deepEqual(
+    scoreFromFeedback(outcome.body),
+    { correct: 0, total: 0, score: 0 },
+    'blank originals stay excluded from the verdict-based progress score'
+  );
+});
+
+test('POST /api/feedback pre-normalizes a blank answer with a model score of 0 without repair', async () => {
+  const feedback = ratingRouteFeedback();
+  feedback.answers[2].verdict = 'correct';
+  feedback.answers[2].score = 0;
+  feedback.answers[2].original = 'FABRICATED';
+  const outcome = await runFeedbackRepair(feedback, feedback, {});
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.calls, 1, 'blank normalization happens before validation');
+  const w1 = outcome.body.answers.find((answer) => answer.question_id === 'w1');
+  assert.equal(w1.original, '');
+  assert.equal(w1.score, 1);
+  assert.equal(w1.verdict, 'mistake');
+  assert.equal(w1.error_type, 'error');
+});
+
+test('POST /api/feedback accepts and strips model-supplied choice scores without repair', async () => {
+  const first = ratingRouteFeedback();
+  first.answers[1].score = 5;
+  first.answers[1].max_score = 5;
+  const outcome = await runFeedbackRepair(first, ratingRouteFeedback());
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.calls, 1, 'choice scores must not trigger a repair');
+  const choice = outcome.body.answers.find((answer) => answer.question_id === 'c1');
+  assert.equal(choice.score, undefined);
+  assert.equal(choice.max_score, undefined);
+});
+
+test('POST /api/feedback does not read inherited answer-map properties for prototype-named ids', async () => {
+  const worksheet = {
+    topic: 'Prototype',
+    sections: [
+      {
+        id: 'reading',
+        title_fr: 'Lis',
+        instructions_fr: 'e',
+        text_fr: 'Un texte.',
+        questions: [
+          { id: 'constructor', prompt: 'p', type: 'short_text', answer: 'a', explanation: 'x' }
+        ]
+      }
+    ]
+  };
+  const feedback = {
+    answers: [
+      {
+        question_id: 'constructor',
+        original: 'FABRICATED ANSWER',
+        verdict: 'correct',
+        correction: 'c',
+        explanation: 'e',
+        error_type: 'style',
+        score: 5,
+        max_score: 5
+      }
+    ],
+    summary: { strengths: [], recurring_mistakes: [], priorities: [], follow_up: 'next' }
+  };
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, { message: { content: JSON.stringify(feedback) } }));
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ worksheet, answers: {} })
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const row = body.answers[0];
+    assert.equal(row.original, '', 'the inherited Object.prototype.constructor must not leak');
+    assert.equal(row.score, 1);
+    assert.equal(row.verdict, 'mistake');
+    assert.equal(row.error_type, 'error');
+
+    const { scoreFromFeedback } = await import('../public/lib/scores.js');
+    assert.deepEqual(scoreFromFeedback(body), { correct: 0, total: 0, score: 0 });
+  });
+});
+
+test('POST /api/feedback accepts shuffled answers and returns rows in worksheet order', async () => {
+  const feedback = ratingRouteFeedback();
+  feedback.answers.reverse();
+  const outcome = await runFeedbackRepair(feedback, feedback);
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.calls, 1, 'shuffled answers are a validation-valid set');
+  assert.deepEqual(
+    outcome.body.answers.map((answer) => answer.question_id),
+    ['r1', 'c1', 'w1', 'w2', 'w3', 'w4']
+  );
+});
+
+test('buildFeedbackRepairPrompt states the complete-set and blank-answer rules', () => {
+  const prompt = buildFeedbackRepairPrompt(['missing answer']);
+  assert.match(prompt, /exactly one answer per worksheet question/);
+  assert.match(prompt, /in worksheet order/);
+  assert.match(prompt, /blank answer must be "verdict": "mistake", "error_type": "error", "score": 1/);
+  assert.match(prompt, /choice answers omit scores/);
+});
+
+test('POST /api/feedback accepts a legacy form rating and keeps max_score 5', async () => {
+  const worksheet = {
+    topic: 'Legacy',
+    sections: [
+      {
+        id: 'writing',
+        title_fr: 'Écris',
+        instructions_fr: 'e',
+        questions: [
+          {
+            id: 'w1',
+            prompt: 'Complète ta fiche.',
+            type: 'form',
+            fields: [{ label_fr: 'Nom' }],
+            answer: 'Nom : Durand.',
+            explanation: 'On écrit son nom.'
+          }
+        ]
+      }
+    ]
+  };
+  const feedback = {
+    answers: [
+      {
+        question_id: 'w1',
+        original: 'MODEL REWROTE THIS',
+        verdict: 'correct',
+        correction: 'Nom : Durand.',
+        explanation: 'Bien.',
+        error_type: 'style',
+        score: 4,
+        max_score: 5
+      }
+    ],
+    summary: { strengths: [], recurring_mistakes: [], priorities: [], follow_up: 'next' }
+  };
+  const fetchImpl = makeFetchMock(() => jsonResponse(200, { message: { content: JSON.stringify(feedback) } }));
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ worksheet, answers: { w1: { Nom: 'Durand' } } })
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.answers[0].max_score, 5);
+    assert.equal(body.answers[0].score, 4);
+    assert.equal(body.answers[0].original, 'Nom : Durand');
+  });
+});
+
 test('validateFeedback accepts original "" for an all-empty form', () => {
   const feedback = {
     answers: [
-      { question_id: 'w1', original: '', verdict: 'mistake', correction: 'x', explanation: 'y', error_type: 'error' }
+      { question_id: 'w1', original: '', verdict: 'mistake', correction: 'x', explanation: 'y', error_type: 'error', score: 1, max_score: 5 }
     ],
     summary: { strengths: [], recurring_mistakes: [], priorities: [], follow_up: 'next' }
   };
@@ -1080,7 +1420,7 @@ test('validateFeedback accepts original "" for an all-empty form', () => {
 test('POST /api/feedback sends a French-only system prompt', async () => {
   const feedback = {
     answers: [
-      { question_id: 'r1', original: 'x', verdict: 'correct', correction: 'x', explanation: 'y', error_type: 'style' }
+      { question_id: 'r1', original: 'x', verdict: 'correct', correction: 'x', explanation: 'y', error_type: 'style', score: 5, max_score: 5 }
     ],
     summary: { strengths: [], recurring_mistakes: [], priorities: [], follow_up: 'next' }
   };
@@ -1181,6 +1521,87 @@ test('buildFeedbackPrompt emits an empty learner answer for an all-empty form', 
   };
   const prompt = buildFeedbackPrompt(worksheet, { w1: { Nom: '   ' } });
   assert.match(prompt, /learner answer: \s*$/m);
+});
+
+test('buildFeedbackPrompt emits max_score per question and the rating rubric', () => {
+  const worksheet = {
+    topic: 'Notation',
+    sections: [
+      {
+        id: 'reading',
+        title_fr: 'Lis',
+        instructions_fr: 'e',
+        text_fr: 'Un texte.',
+        questions: [
+          { id: 'r1', prompt: 'p', type: 'choice', options: ['a', 'b', 'c'], answer: 'a' }
+        ]
+      },
+      {
+        id: 'writing',
+        title_fr: 'Écris',
+        instructions_fr: 'e',
+        questions: [
+          { id: 'w1', prompt: 'p1', type: 'short_text', answer: 'a' },
+          { id: 'w2', prompt: 'p2', type: 'short_text', answer: 'a' },
+          { id: 'w3', prompt: 'p3', type: 'short_text', answer: 'a' },
+          { id: 'w4', prompt: 'p4', type: 'short_text', answer: 'a' }
+        ]
+      }
+    ]
+  };
+  const prompt = buildFeedbackPrompt(worksheet, {});
+  assert.match(prompt, /question_id: r1[\s\S]*max_score: none/);
+  assert.match(prompt, /question_id: w1[\s\S]*max_score: 5/);
+  assert.match(prompt, /question_id: w4[\s\S]*max_score: 10/);
+  assert.match(prompt, /5 fully correct and natural/);
+  assert.match(prompt, /9–10 excellent/);
+  assert.match(prompt, /A blank answer gets 1/);
+  assert.match(prompt, /Rating is independent of the verdict|rating is independent of the verdict/);
+  assert.match(prompt, /omit both "score" and "max_score"/);
+});
+
+test('buildFeedbackPrompt keeps max_score none for choice and 5 for a legacy form', () => {
+  const worksheet = {
+    topic: 'Legacy',
+    sections: [
+      {
+        id: 'writing',
+        title_fr: 'Écris',
+        instructions_fr: 'e',
+        questions: [
+          {
+            id: 'legacy',
+            prompt: 'Complète ta fiche.',
+            type: 'form',
+            fields: [{ label_fr: 'Nom' }],
+            answer: 'Nom : Durand.'
+          }
+        ]
+      }
+    ]
+  };
+  const prompt = buildFeedbackPrompt(worksheet, { legacy: { Nom: 'Durand' } });
+  assert.match(prompt, /question_id: legacy[\s\S]*max_score: 5/);
+  assert.doesNotMatch(prompt, /max_score: none/);
+});
+
+test('buildFeedbackPrompt reuses a supplied rating map', () => {
+  const worksheet = {
+    topic: 'Map',
+    sections: [
+      {
+        id: 'reading',
+        title_fr: 'Lis',
+        instructions_fr: 'e',
+        text_fr: 'Un texte.',
+        questions: [{ id: 'r1', prompt: 'p', type: 'short_text', answer: 'a' }]
+      }
+    ]
+  };
+  const supplied = new Map([['r1', 10]]);
+  const prompt = buildFeedbackPrompt(worksheet, {}, supplied);
+  assert.match(prompt, /question_id: r1[\s\S]*max_score: 10/);
+  assert.match(buildFeedbackPrompt(worksheet, {}), /question_id: r1[\s\S]*max_score: 5/);
 });
 
 test('formatAnswerForPrompt falls back to object entries when fields are missing', () => {

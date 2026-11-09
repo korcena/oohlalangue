@@ -126,6 +126,65 @@ export function buildRenderModel(worksheet, { reveal = false } = {}) {
   };
 }
 
+// Word-level inline diff used by the feedback view. Returns an ordered list of
+// runs (`same` / `del` / `ins`) or null when either side is too long to diff
+// safely. Punctuation stays attached to its word; case and accents are
+// compared exactly. The LCS backtrack prefers a deletion over an insertion on
+// ties, so the output is deterministic. Adjacent runs of the same type merge.
+export function diffWords(original, correction) {
+  const leftText = str(original).normalize('NFC').replace(/\s+/g, ' ').trim();
+  const rightText = str(correction).normalize('NFC').replace(/\s+/g, ' ').trim();
+  const left = leftText ? leftText.split(' ') : [];
+  const right = rightText ? rightText.split(' ') : [];
+  if (left.length > 300 || right.length > 300) return null;
+  if (!leftText) return [];
+  if (!rightText) return [{ type: 'del', text: leftText }];
+  if (leftText === rightText) return [{ type: 'same', text: leftText }];
+
+  const n = left.length;
+  const m = right.length;
+  // dp[i][j] = length of the LCS of left[i..] and right[j..].
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      dp[i][j] =
+        left[i] === right[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const runs = [];
+  const push = (type, text) => {
+    const last = runs[runs.length - 1];
+    if (last && last.type === type) last.text = `${last.text} ${text}`;
+    else runs.push({ type, text });
+  };
+
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (left[i] === right[j]) {
+      push('same', left[i]);
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      push('del', left[i]);
+      i += 1;
+    } else {
+      push('ins', right[j]);
+      j += 1;
+    }
+  }
+  while (i < n) {
+    push('del', left[i]);
+    i += 1;
+  }
+  while (j < m) {
+    push('ins', right[j]);
+    j += 1;
+  }
+  return runs;
+}
+
 // Map feedback onto the worksheet's question order so the view can render the
 // original answer immediately followed by its correction (adjacent ordering).
 export function feedbackToUi(feedback, worksheet) {
@@ -143,6 +202,15 @@ export function feedbackToUi(feedback, worksheet) {
       const q = question && typeof question === 'object' ? question : {};
       const id = str(q.id);
       const entry = byId.get(id) || null;
+      const rawScore = entry && Number.isInteger(entry.score) ? entry.score : null;
+      const rawMaxScore = entry && Number.isInteger(entry.max_score) ? entry.max_score : null;
+      const hasValidRating =
+        str(q.type) !== 'choice' &&
+        rawScore !== null &&
+        rawMaxScore !== null &&
+        (rawMaxScore === 5 || rawMaxScore === 10) &&
+        rawScore >= 1 &&
+        rawScore <= rawMaxScore;
       rows.push({
         question_id: id,
         prompt: str(q.prompt),
@@ -153,6 +221,8 @@ export function feedbackToUi(feedback, worksheet) {
         explanation: entry ? str(entry.explanation) : '',
         errorType: entry ? str(entry.error_type) : '',
         errorTypeLabel: entry ? errorTypeLabel(entry.error_type) : '',
+        score: hasValidRating ? rawScore : null,
+        maxScore: hasValidRating ? rawMaxScore : null,
         hasFeedback: Boolean(entry)
       });
     }
@@ -234,5 +304,6 @@ export default {
   isRevealedFromAnswers,
   buildRenderModel,
   feedbackToUi,
+  diffWords,
   deriveUtterances
 };

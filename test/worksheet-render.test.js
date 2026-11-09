@@ -288,6 +288,8 @@ test('feedbackToUi preserves worksheet question order and keeps original adjacen
   assert.equal(l1.correction, 'un café');
   assert.equal(l1.explanation, 'Correct.');
   assert.equal(l1.errorTypeLabel, 'Style');
+  assert.equal(l1.score, null, 'choice questions carry no rating');
+  assert.equal(l1.maxScore, null);
   assert.equal(l1.hasFeedback, true);
 
   const r1 = rows[1];
@@ -295,6 +297,8 @@ test('feedbackToUi preserves worksheet question order and keeps original adjacen
   assert.equal(r1.verdictLabel, 'Erreur');
   assert.equal(r1.correction, 'Vrai');
   assert.equal(r1.errorTypeLabel, 'Erreur');
+  assert.equal(r1.score, null);
+  assert.equal(r1.maxScore, null);
 });
 
 test('verdict and error-type labels are French only', async () => {
@@ -311,6 +315,182 @@ test('feedbackToUi returns unanswered questions as empty rows with feedback abse
   const rows = feedbackToUi({ answers: [] }, sampleWorksheet());
   assert.equal(rows.length, 2);
   assert.ok(rows.every((r) => r.hasFeedback === false && r.original === ''));
+});
+
+test('feedbackToUi maps integer score and max_score, and null otherwise', async () => {
+  const { feedbackToUi } = await loadHelpers();
+  const worksheet = {
+    sections: [
+      {
+        id: 'writing',
+        questions: [
+          { id: 'w4', prompt: 'Message' },
+          { id: 'w1', prompt: 'Question' },
+          { id: 'w2', prompt: 'Malformed' },
+          { id: 'w3', prompt: 'Missing' },
+          { id: 'w5', prompt: 'Invalid max' }
+        ]
+      }
+    ]
+  };
+  const feedback = {
+    answers: [
+      { question_id: 'w4', original: 'x', verdict: 'correct', correction: 'x', explanation: 'e', error_type: 'style', score: 8, max_score: 10 },
+      { question_id: 'w1', original: 'x', verdict: 'correct', correction: 'x', explanation: 'e', error_type: 'style' },
+      { question_id: 'w2', original: 'x', verdict: 'correct', correction: 'x', explanation: 'e', error_type: 'style', score: '8', max_score: 10.5 },
+      { question_id: 'w3', original: 'x', verdict: 'correct', correction: 'x', explanation: 'e', error_type: 'style' },
+      { question_id: 'w5', original: 'x', verdict: 'correct', correction: 'x', explanation: 'e', error_type: 'style', score: 4, max_score: 7 }
+    ]
+  };
+  const rows = feedbackToUi(feedback, worksheet);
+  assert.equal(rows[0].score, 8);
+  assert.equal(rows[0].maxScore, 10);
+  assert.equal(rows[1].score, null);
+  assert.equal(rows[1].maxScore, null);
+  assert.equal(rows[2].score, null);
+  assert.equal(rows[2].maxScore, null);
+  assert.equal(rows[3].score, null);
+  assert.equal(rows[3].maxScore, null);
+  assert.equal(rows[4].score, null, 'max_score 7 is not a valid scale');
+  assert.equal(rows[4].maxScore, null);
+});
+
+test('feedbackToUi never exposes ratings for choice questions', async () => {
+  const { feedbackToUi } = await loadHelpers();
+  const worksheet = {
+    sections: [
+      {
+        id: 'reading',
+        questions: [{ id: 'q1', prompt: 'Choix', type: 'choice', options: ['a', 'b'] }]
+      }
+    ]
+  };
+  const feedback = {
+    answers: [
+      {
+        question_id: 'q1',
+        original: 'a',
+        verdict: 'correct',
+        correction: 'a',
+        explanation: 'e',
+        error_type: 'style',
+        score: 5,
+        max_score: 5
+      }
+    ]
+  };
+  const [row] = feedbackToUi(feedback, worksheet);
+  assert.equal(row.score, null);
+  assert.equal(row.maxScore, null);
+});
+
+// -- diffWords ---------------------------------------------------------------
+
+test('diffWords returns no runs for an empty original and a deletion for an empty correction', async () => {
+  const { diffWords } = await loadHelpers();
+  assert.deepEqual(diffWords('', 'Bonjour'), []);
+  assert.deepEqual(diffWords('   ', 'Bonjour'), []);
+  assert.deepEqual(diffWords('Bonjour', ''), [{ type: 'del', text: 'Bonjour' }]);
+});
+
+test('diffWords collapses whitespace and returns one same run when identical', async () => {
+  const { diffWords } = await loadHelpers();
+  assert.deepEqual(diffWords('  Bonjour   le   monde  ', 'Bonjour le monde'), [
+    { type: 'same', text: 'Bonjour le monde' }
+  ]);
+});
+
+test('diffWords marks a word substitution as a deletion then an insertion', async () => {
+  const { diffWords } = await loadHelpers();
+  assert.deepEqual(diffWords('Je vais au cafe', 'Je vais au café'), [
+    { type: 'same', text: 'Je vais au' },
+    { type: 'del', text: 'cafe' },
+    { type: 'ins', text: 'café' }
+  ]);
+});
+
+test('diffWords handles insertions and deletions', async () => {
+  const { diffWords } = await loadHelpers();
+  assert.deepEqual(diffWords('Je mange une pomme', 'Je mange une belle pomme'), [
+    { type: 'same', text: 'Je mange une' },
+    { type: 'ins', text: 'belle' },
+    { type: 'same', text: 'pomme' }
+  ]);
+  assert.deepEqual(diffWords('Je mange une belle pomme', 'Je mange une pomme'), [
+    { type: 'same', text: 'Je mange une' },
+    { type: 'del', text: 'belle' },
+    { type: 'same', text: 'pomme' }
+  ]);
+});
+
+test('diffWords keeps punctuation attached to its word', async () => {
+  const { diffWords } = await loadHelpers();
+  assert.deepEqual(diffWords('Bonjour, monde.', 'Bonjour, le monde.'), [
+    { type: 'same', text: 'Bonjour,' },
+    { type: 'ins', text: 'le' },
+    { type: 'same', text: 'monde.' }
+  ]);
+});
+
+test('diffWords compares case and accents exactly', async () => {
+  const { diffWords } = await loadHelpers();
+  assert.deepEqual(diffWords('Bonjour', 'bonjour'), [
+    { type: 'del', text: 'Bonjour' },
+    { type: 'ins', text: 'bonjour' }
+  ]);
+  assert.deepEqual(diffWords('eleve', 'élève'), [
+    { type: 'del', text: 'eleve' },
+    { type: 'ins', text: 'élève' }
+  ]);
+});
+
+test('diffWords merges adjacent runs of the same type', async () => {
+  const { diffWords } = await loadHelpers();
+  assert.deepEqual(diffWords('a b c d', 'a x y d'), [
+    { type: 'same', text: 'a' },
+    { type: 'del', text: 'b c' },
+    { type: 'ins', text: 'x y' },
+    { type: 'same', text: 'd' }
+  ]);
+});
+
+test('diffWords is deterministic on ties', async () => {
+  const { diffWords } = await loadHelpers();
+  const first = diffWords('chat', 'chien');
+  assert.deepEqual(first, [
+    { type: 'del', text: 'chat' },
+    { type: 'ins', text: 'chien' }
+  ]);
+  assert.deepEqual(diffWords('chat', 'chien'), first);
+});
+
+test('diffWords compares normalized Unicode accents as identical', async () => {
+  const { diffWords } = await loadHelpers();
+  const nfc = 'élève déjà vu';
+  const nfd = nfc.normalize('NFD');
+  assert.notEqual(nfc, nfd);
+  assert.deepEqual(diffWords(nfd, nfc), [{ type: 'same', text: nfc }]);
+  assert.deepEqual(diffWords(nfc, nfd), [{ type: 'same', text: nfc }]);
+});
+
+test('diffWords returns null when either side exceeds 300 words, even if identical', async () => {
+  const { diffWords } = await loadHelpers();
+  const long = Array.from({ length: 301 }, (_, i) => `mot${i}`).join(' ');
+  const other = Array.from({ length: 301 }, (_, i) => `autre${i}`).join(' ');
+  assert.equal(diffWords(long, long), null, 'identical inputs over 300 words must return null');
+  assert.equal(diffWords(long, other), null);
+  assert.equal(diffWords('court', long), null);
+  assert.equal(diffWords(long, 'court'), null);
+});
+
+test('diffWords processes exactly 300 differing words', async () => {
+  const { diffWords } = await loadHelpers();
+  const left = Array.from({ length: 300 }, (_, i) => `mot${i}`).join(' ');
+  const right = Array.from({ length: 300 }, (_, i) => (i === 299 ? 'autre' : `mot${i}`)).join(' ');
+  const runs = diffWords(left, right);
+  assert.ok(Array.isArray(runs), 'exactly 300 words must still be diffed');
+  assert.ok(runs.some((run) => run.type === 'del' && run.text === 'mot299'));
+  assert.ok(runs.some((run) => run.type === 'ins' && run.text === 'autre'));
 });
 
 test('deriveUtterances splits dialogue lines by speaker and keeps order', async () => {

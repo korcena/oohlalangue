@@ -1238,6 +1238,80 @@
         color: var(--muted);
       }
 
+      .feedback .fb-diff {
+        display: inline;
+        line-height: 1.5;
+      }
+
+      .diff-del {
+        color: var(--coral);
+        text-decoration: line-through;
+        background: rgba(255, 140, 105, 0.14);
+        padding: 0 3px;
+        border-radius: 4px;
+      }
+
+      .diff-ins {
+        color: var(--green);
+        text-decoration: none;
+        font-weight: 600;
+        background: rgba(123, 216, 143, 0.14);
+        padding: 0 3px;
+        border-radius: 4px;
+      }
+
+      .fb-empty {
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      .diff-legend {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .feedback .correction.correction-alt {
+        background: rgba(123, 216, 143, 0.08);
+        border-color: rgba(123, 216, 143, 0.3);
+      }
+
+      .feedback .correction.correction-alt > div {
+        color: var(--green);
+      }
+
+      .score-badge {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+      }
+
+      .score-badge.score-high {
+        color: var(--green);
+        background: rgba(123, 216, 143, 0.12);
+        border-color: rgba(123, 216, 143, 0.45);
+      }
+
+      .score-badge.score-mid {
+        color: var(--gold);
+        background: rgba(245, 200, 66, 0.12);
+        border-color: rgba(245, 200, 66, 0.45);
+      }
+
+      .score-badge.score-low {
+        color: var(--coral);
+        background: rgba(255, 140, 105, 0.12);
+        border-color: rgba(255, 140, 105, 0.45);
+      }
+
+      .summary-points {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--gold);
+      }
+
       .summary-card {
         background: var(--panel);
         border: 1px solid var(--border);

@@ -8,11 +8,13 @@ A small web app for practicing French. It has two paths:
 - **Worksheet (Fiche d'exercices)** — the app generates a DELF A1-style worksheet
   (listening, reading, grammar, writing), you answer it in the browser, it autosaves to
   `localStorage`, the listening section is voiced with OpenAI TTS and cached in IndexedDB, and
-  you can send it to the teacher for feedback rendered next to each answer. Each section gets its
-  own A1 curriculum theme.
+  you can send it to the teacher for feedback rendered next to each answer. Free-response answers
+  are rated, and corrections are shown inline (red strikethrough / green insertion). Each section
+  gets its own A1 curriculum theme.
 
 Up to **3 new fiches per week** (client-side, resetting each Sunday 00:00 local time), and the
-home page's **Progrès** panel gives each graded fiche a score (% correct) with a 12-week line chart.
+home page's **Progrès** panel gives each graded fiche a verdict-based score (% correct) with a
+12-week line chart.
 
 The server is a **minimal key proxy**: it serves the static frontend and forwards AI requests to
 **Ollama Cloud** (default) or **OpenAI** for text, and **OpenAI TTS** for speech. API keys stay
@@ -195,11 +197,17 @@ Both are **client-side** (per browser/device), using the same defensive `localSt
   generation does not. The window resets every **Sunday 00:00 local time**. When the limit is
   reached, only creating a new fiche is blocked (with a French notice naming the next reset);
   resuming, answering, listening to, and sending an existing fiche keep working.
-- **Scores:** each graded fiche gets a score of `round(correct / total × 100)` from the teacher
-  feedback (`correct` and `alternative` count; blank answers are not graded). Scores are grouped
-  by the same Sunday week and kept for the **last 12 weeks**. The home **Progrès** panel shows this
-  week's fiches and average, the 12-week list, and an inline SVG **line chart** of weekly averages
-  (0–100) with an accessible summary.
+- **Scores and points:** each graded fiche gets a verdict-based score of
+  `round(correct / total × 100)` from the teacher feedback (`correct` and `alternative` count;
+  blank answers are not graded). Scores are grouped by the same Sunday week and kept for the
+  **last 12 weeks**. The home **Progrès** panel shows this week's fiches and average, the 12-week
+  list, and an inline SVG **line chart** of weekly averages (0–100) with an accessible summary.
+- **Per-answer ratings:** every free-response answer is also rated by the teacher: 1–5 for short
+  free-response questions, and 1–10 for the last writing message/letter/SMS. Multiple-choice
+  ratings are ignored/stripped. A blank answer gets 1, and the rating is independent of the verdict
+  (`correct`/`alternative`/`mistake`). The worksheet summary shows a deterministic rating-based
+  `Points : X/Y` total, and each feedback card shows a `Note : X/Y` badge. The **Progrès** chart
+  remains verdict-based; the points total is extra feedback, not the history score.
 - Clearing browser storage resets both. They are self-discipline/insight aids, **not** a security
   boundary (a determined user can clear them).
 
@@ -212,12 +220,13 @@ Both are **client-side** (per browser/device), using the same defensive `localSt
 | `POST /api/chat` | `{ messages, name, profile, skipQuestion, voiceMode }` | `{ text }` (provider/model details stay server-side) |
 | `POST /api/generate` | `{ topic? (legacy label; per-section themes are auto-assigned from the A1 curriculum), level='A1', length, includeListening, name?, profile? }` | worksheet JSON (see below); 5 oral + 5 reading questions, globally unique ids |
 | `POST /api/tts` | `{ utterances:[{speaker,text}], speakers:[{name,voice}], cache_key }` | `{ segments:[{speaker,mime,base64,pause_after_ms}] }` |
-| `POST /api/feedback` | `{ worksheet, answers }` (form answers may be objects keyed by field label) | `{ answers:[…], summary:{…} }`; each `original` is a readable string (`Label : valeur ; …`) |
+| `POST /api/feedback` | `{ worksheet, answers }` (legacy form answers may be objects keyed by field label) | `{ answers:[…], summary:{…} }`; each `original` is a readable string (`Label : valeur ; …`) and free-response answers carry `score` + `max_score` (the server computes the expected maximum) |
 | `GET /health` | — | provider/config booleans (no secrets) |
 | `GET /api/auth` | — | `{ required }` |
 | `POST /api/auth` | password header/body | `{ ok }` or 401 |
 
-Structured worksheet shape (see `docs/superpowers/specs/` for the full contract):
+Structured worksheet shape (the files under `docs/superpowers/specs/` are historical design records;
+this README is the current contract):
 
 ```json
 {
@@ -232,8 +241,8 @@ Structured worksheet shape (see `docs/superpowers/specs/` for the full contract)
       "text_fr": "string (reading only)",
       "audio": { "script": "…", "speakers": [{ "name": "A", "voice": "alloy" }], "cache_key": "…" },
       "questions": [
-        { "id": "string", "prompt": "string", "type": "short_text|choice|fill_blank|translation|form",
-          "options": ["… (choice only)"], "fields": [{ "label_fr": "… (form only)" }],
+        { "id": "string", "prompt": "string", "type": "short_text|choice|fill_blank|translation",
+          "options": ["… (choice only)"],
           "answer": "string", "explanation": "string" }
       ]
     }
@@ -259,11 +268,33 @@ The worksheet follows DELF A1 format:
   mixing `choice` (3 options) and `short_text`, with at least one inference question.
 - **Grammaire** — French-only grammar practice (fill-in-the-blank, conjugation, agreement,
   French-sentence reformulation); never English→French translation.
-- **Expression écrite** — exactly two production tasks: one `form` (5–8 French `fields` with
-  `label_fr`, completed like a real-life fiche d'inscription) and one `short_text` reply of
-  environ 40–50 mots to a short French situation/message. The form is a field-based control, not
-  a single textarea; its answers are stored as an object keyed by field label and serialized by
-  the server before feedback.
+- **Expression écrite** — exactly **4 `short_text` questions**, written in full French sentences.
+  The mix is a preference/opinion question, a routine/weekend question, a description
+  question, and a short communicative message. The first `WRITING_QUESTION_COUNT - 1` questions
+  (three by default) are shorter 1–2-sentence answer questions; the **last** question is the short
+  message/letter/SMS task (about 40–50 words). `instructions_fr` asks for one or two complete
+  sentences for those first questions and a 40–50-word message for the last. There is no
+  identity/contact form in new fiches: no `Nom`, `Prénom`, `Nationalité`, date of birth, address,
+  phone or e-mail. New generations never use `type: "form"` and never include a `fields` array.
+  Old saved fiches containing `form` questions still render, accept answers, and receive feedback.
+
+In feedback, a wrong free-response answer is shown **inline**: wrong words are struck through in
+red and replacements appear in green (`<del class="diff-del">` / `<ins class="diff-ins">`), so the
+learner does not have to compare two paragraphs. An `alternative` answer is shown plain (no
+strikethrough) with a green-tinted correction box, a `correct` answer is plain, and a blank answer
+shows `Aucune réponse`. Very long answers (more than 300 words on either side) fall back to the
+plain original text.
+
+Free-response answers are rated **1–5**; the last writing message/letter is rated **1–10**;
+multiple-choice ratings are ignored and stripped. Legacy `form` answers remain rated out of 5. A
+blank answer gets 1, and the rating is independent of the verdict. The feedback contract includes
+`score` and `max_score`; the server computes `max_score` and overwrites any model-supplied value.
+The teacher summary shows `Points : X/Y` (rating-based); the progress chart stays verdict-based.
+Feedback must contain exactly one answer for every worksheet question, including blank answers;
+unknown or duplicate ids are rejected and repaired. The server returns one answer per question in
+worksheet order (the repair prompt asks the model to do the same); worksheet order is not a
+validation requirement. A blank answer is normalized to `verdict: "mistake"` and
+`error_type: "error"` with score 1 when rated, so it can never display a green "Correct".
 
 The `audio` block appears **only** on the `listening` section; `text_fr` (the French reading
 passage) appears **only** on the `reading` section and is required there. Every learner-facing
@@ -296,8 +327,10 @@ entries to the `CURRICULUM_MODULES` array and optionally extend `CURRICULUM_SUMM
 
 Compréhension orale and Compréhension écrite are fixed at **5 questions each** in `lengthToCounts`
 (`server.js`) and enforced in `validateWorksheet`. The grammar count still follows the length
-selector; Expression écrite is always one form + one message. Change the counts in both places
-together (prompt + validator).
+selector. Expression écrite is always **4 `short_text` questions**, controlled by the
+`WRITING_QUESTION_COUNT` constant; the prompt and validator both use it. The last writing question
+is rated out of **10** by `ratingMaxForQuestion()`; all other free-response questions are out of
+**5**. Change the counts and rating rule together (prompt + validator + tests).
 
 ### Change the tutor's persona or correction format
 
