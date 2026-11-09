@@ -1175,8 +1175,13 @@ function buildFeedbackPrompt(worksheet, answersMap, ratingMaxByQuestionId) {
   const sections = (worksheet && worksheet.sections) || [];
   const ratingMax =
     ratingMaxByQuestionId instanceof Map ? ratingMaxByQuestionId : buildRatingMaxMap(worksheet);
+  const totalQuestions = sections.reduce(
+    (count, section) => count + (section && Array.isArray(section.questions) ? section.questions.length : 0),
+    0
+  );
   const lines = [];
   lines.push(`You are correcting an A1 French worksheet. Topic: "${(worksheet && worksheet.topic) || 'unknown'}".`);
+  lines.push(`The worksheet has ${totalQuestions} questions. Return exactly ${totalQuestions} answer objects, one per question_id, in worksheet order, including blank answers.`);
   lines.push('');
   lines.push('Worksheet and learner answers:');
   for (const section of sections) {
@@ -1202,7 +1207,7 @@ function buildFeedbackPrompt(worksheet, answersMap, ratingMaxByQuestionId) {
   lines.push('Return ONLY a single valid JSON object with this shape:');
   lines.push('{');
   lines.push('  "answers": [');
-  lines.push('    { "question_id": "string", "original": "the learner answer, copied exactly", "verdict": "correct|mistake|alternative", "correction": "string", "explanation": "string", "error_type": "error|style|alternative", "score": 4, "max_score": 5 }');
+  lines.push('    { "question_id": "string", "verdict": "correct|mistake|alternative", "correction": "string", "explanation": "string", "error_type": "error|style|alternative", "score": 4, "max_score": 5 }');
   lines.push('  ],');
   lines.push('  "summary": { "strengths": ["..."], "recurring_mistakes": ["..."], "priorities": ["..."], "follow_up": "string" }');
   lines.push('}');
@@ -1210,7 +1215,7 @@ function buildFeedbackPrompt(worksheet, answersMap, ratingMaxByQuestionId) {
   lines.push('- 5 points: 5 fully correct and natural; 4 a minor error; 3 several errors but understandable; 2 major errors or partly unclear; 1 off-topic, blank or incomprehensible.');
   lines.push('- 10 points: 9–10 excellent; 7–8 good; 5–6 understandable with errors; 3–4 major errors; 1–2 very poor or blank.');
   lines.push('A blank answer gets 1. An "alternative" answer can still score 4/5. A "correct" answer should normally get the maximum.');
-  lines.push('Rules: verdict must be one of correct|mistake|alternative. error_type must be one of error|style|alternative. Copy each learner answer into "original" exactly as given. For each question, the "max_score" line gives the maximum: when it is 5 or 10, return an integer "score" from 1 to that maximum and copy the given "max_score" exactly; when it is "none", omit both "score" and "max_score". For a form question, the learner answer is already formatted as "Label : valeur ; Label : valeur". Write every correction, explanation and summary item in French only — never English. Be encouraging and concise.');
+  lines.push('Rules: verdict must be one of correct|mistake|alternative. error_type must be one of error|style|alternative. Do NOT include an "original" field; the server fills it. Return one answer per question in worksheet order, including blank answers. For each question, the "max_score" line gives the maximum: when it is 5 or 10, return an integer "score" from 1 to that maximum and copy the given "max_score" exactly; when it is "none", omit both "score" and "max_score". For a form question, the learner answer is already formatted as "Label : valeur ; Label : valeur". Write every correction, explanation and summary item in French only — never English. Be encouraging and concise.');
   return lines.join('\n');
 }
 
@@ -1261,7 +1266,9 @@ function validateFeedback(value, { ratingMaxByQuestionId } = {}) {
       }
       const questionId = typeof a.question_id === 'string' ? a.question_id.trim() : '';
       if (!questionId) errors.push(`${where}.question_id must be a non-empty string`);
-      if (typeof a.original !== 'string') errors.push(`${where}.original must be a string`);
+      if (Object.prototype.hasOwnProperty.call(a, 'original') && typeof a.original !== 'string') {
+        errors.push(`${where}.original must be a string when present`);
+      }
       if (!FEEDBACK_VERDICTS.includes(a.verdict)) errors.push(`${where}.verdict must be one of ${FEEDBACK_VERDICTS.join(' | ')}`);
       if (typeof a.correction !== 'string' || !a.correction.trim()) errors.push(`${where}.correction must be a non-empty string`);
       if (typeof a.explanation !== 'string' || !a.explanation.trim()) errors.push(`${where}.explanation must be a non-empty string`);
@@ -1646,61 +1653,123 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
       }
     }
 
-    // Overwrite model-supplied originals with the real learner answers and
-    // blank-normalize known rows before validation. Unknown, duplicate and
-    // missing ids are intentionally left alone so validation still rejects
-    // them. The same helper is reused after validation with `final: true` to
-    // enforce the server-computed max and choice score stripping.
-    const normalizeFeedbackRow = (a, { final = false } = {}) => {
-      if (!a || typeof a !== 'object' || Array.isArray(a)) return a;
+    // Server-authoritative normalization before validation. This keeps the
+    // feedback flow resilient: unknown/duplicate ids are filtered (last known
+    // row wins), missing blank answers are synthesized, originals are always
+    // read from the learner's answers map, ratings are normalized to the
+    // worksheet scale, invalid enum values are mapped to safe defaults, and
+    // choice scores are stripped. Rows that still lack a correction or
+    // explanation fail validation and go through the one-shot repair.
+    const hasOwnAnswer = (id) => Object.prototype.hasOwnProperty.call(answersMap, id);
+    const readOriginal = (id) => {
+      const raw = hasOwnAnswer(id) ? answersMap[id] : '';
+      return formatAnswerForPrompt(questionById.get(id), raw);
+    };
+    const normalizeFeedbackRow = (a, expected, { synthesize = false } = {}) => {
       const id = typeof a.question_id === 'string' ? a.question_id.trim() : '';
-      if (!id || !ratingMaxByQuestionId.has(id)) return a;
-      const hasAnswer = Object.prototype.hasOwnProperty.call(answersMap, id);
-      const raw = hasAnswer ? answersMap[id] : '';
-      const original = formatAnswerForPrompt(questionById.get(id), raw);
+      const original = readOriginal(id);
       const next = Object.assign({}, a, { question_id: id, original });
-      const expected = ratingMaxByQuestionId.get(id);
-      if (!original.trim()) {
+      const question = questionById.get(id) || {};
+      const blank = !original.trim();
+
+      if (!FEEDBACK_VERDICTS.includes(next.verdict)) next.verdict = 'mistake';
+      if (!FEEDBACK_ERROR_TYPES.includes(next.error_type)) {
+        next.error_type =
+          next.verdict === 'correct'
+            ? 'style'
+            : next.verdict === 'alternative'
+              ? 'alternative'
+              : 'error';
+      }
+
+      if (blank) {
         next.verdict = 'mistake';
         next.error_type = 'error';
-        if (expected === null) {
-          delete next.score;
-          delete next.max_score;
-        } else if (expected === 5 || expected === 10) {
-          next.score = 1;
-          next.max_score = expected;
+        if (synthesize) {
+          next.correction =
+            typeof question.answer === 'string' && question.answer.trim()
+              ? question.answer
+              : 'Réponse attendue indisponible.';
+          next.explanation = 'Aucune réponse fournie.';
         }
+      }
+
+      if (expected === null) {
+        delete next.score;
+        delete next.max_score;
         return next;
       }
-      if (final) {
-        if (expected === null) {
-          delete next.score;
-          delete next.max_score;
-        } else if (expected === 5 || expected === 10) {
-          next.max_score = expected;
-        }
+
+      if (blank) {
+        next.score = 1;
+        next.max_score = expected;
+        return next;
       }
+
+      // Normalize an out-of-scale or out-of-range rating instead of forcing a
+      // repair. Rescale only when the model's returned max is itself a valid
+      // 5/10 scale.
+      const rawMax =
+        Number.isInteger(next.max_score) && (next.max_score === 5 || next.max_score === 10)
+          ? next.max_score
+          : expected;
+      let score = Number.isInteger(next.score) ? next.score : 1;
+      if (rawMax !== expected) score = Math.round((score / rawMax) * expected);
+      next.score = Math.max(1, Math.min(expected, score));
+      next.max_score = expected;
       return next;
     };
-    const normalizeFeedbackValue = (value) => {
+    const sanitizeFeedbackValue = (value) => {
       if (!value || !Array.isArray(value.answers)) return value;
-      value.answers = value.answers.map((answer) => normalizeFeedbackRow(answer));
+      const byId = new Map();
+      for (const answer of value.answers) {
+        if (!answer || typeof answer !== 'object' || Array.isArray(answer)) continue;
+        const id = typeof answer.question_id === 'string' ? answer.question_id.trim() : '';
+        if (!id || !ratingMaxByQuestionId.has(id)) continue;
+        byId.set(id, answer);
+      }
+      const answers = [];
+      for (const [id, expected] of ratingMaxByQuestionId) {
+        const entry = byId.get(id);
+        if (entry) {
+          answers.push(normalizeFeedbackRow(entry, expected));
+          continue;
+        }
+        // Synthesize only omitted blank answers. A missing answered question
+        // still needs the model's correction, so it proceeds to repair.
+        if (readOriginal(id).trim()) continue;
+        answers.push(normalizeFeedbackRow({ question_id: id }, expected, { synthesize: true }));
+      }
+      value.answers = answers;
       return value;
+    };
+
+    const debugFeedback =
+      String(env.DEBUG_FEEDBACK || '').trim().toLowerCase() === '1' ||
+      String(env.DEBUG_FEEDBACK || '').trim().toLowerCase() === 'true';
+    const feedbackMaxTokens = Number(env.FEEDBACK_MAX_TOKENS) || 6000;
+    const debugLog = (label, text, check) => {
+      if (!debugFeedback) return;
+      console.error(
+        `[feedback:debug] ${label} maxTokens=${feedbackMaxTokens} questions=${ratingMaxByQuestionId.size} chars=${String(text || '').length} errors=${JSON.stringify((check && check.errors) || [])}`
+      );
+      console.error(`[feedback:debug] ${label} tail:\n${String(text || '').slice(-2000)}`);
     };
 
     try {
       const first = await provider.chatCompletion({
         system: FEEDBACK_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userPrompt }],
-        maxTokens: Number(env.FEEDBACK_MAX_TOKENS) || 3000,
+        maxTokens: feedbackMaxTokens,
         timeoutMs
       });
 
       let parsed = extractJson(first.text);
-      if (parsed) parsed = normalizeFeedbackValue(parsed);
+      if (parsed) parsed = sanitizeFeedbackValue(parsed);
       let check = parsed
         ? validateFeedback(parsed, { ratingMaxByQuestionId })
         : { ok: false, errors: ['response was not valid JSON'] };
+      debugLog('first', first.text, check);
 
       if (!check.ok) {
         const repaired = await provider.chatCompletion({
@@ -1710,14 +1779,15 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
             { role: 'assistant', content: first.text || '' },
             { role: 'user', content: buildFeedbackRepairPrompt(check.errors) }
           ],
-          maxTokens: Number(env.FEEDBACK_MAX_TOKENS) || 3000,
+          maxTokens: feedbackMaxTokens,
           timeoutMs
         });
         parsed = extractJson(repaired.text);
-        if (parsed) parsed = normalizeFeedbackValue(parsed);
+        if (parsed) parsed = sanitizeFeedbackValue(parsed);
         check = parsed
           ? validateFeedback(parsed, { ratingMaxByQuestionId })
           : { ok: false, errors: ['repair response was not valid JSON'] };
+        debugLog('repair', repaired.text, check);
         if (!check.ok) {
           console.error('[feedback] invalid feedback after repair:', check.errors);
           return res.status(502).json({
@@ -1726,28 +1796,17 @@ function createApp({ httpRequest = defaultHttpRequest, env = process.env } = {})
         }
       }
 
-      // Never let the model rewrite or fabricate the learner's answer. Filter
-      // to known worksheet ids, de-duplicate with the last entry winning, then
-      // rebuild in worksheet order so every question has exactly one row.
-      // Ratings are server-authoritative: choice/unrated entries lose any
-      // scores; rated entries always carry the expected maximum and a blank
-      // answer is forced to 1 point.
-      const answerById = new Map();
-      for (const a of parsed.answers) {
-        const id = typeof a.question_id === 'string' ? a.question_id.trim() : '';
-        if (!id || !ratingMaxByQuestionId.has(id)) continue;
-        answerById.set(id, a);
-      }
-      const rows = [];
-      for (const [id] of ratingMaxByQuestionId) {
-        const entry = answerById.get(id);
-        if (!entry) continue;
-        rows.push(normalizeFeedbackRow(entry, { final: true }));
-      }
-      parsed.answers = rows;
-
+      // Final pass: one row per worksheet question in worksheet order, with
+      // originals, blank state, choice stripping and rating scales enforced.
+      parsed = sanitizeFeedbackValue(parsed);
       res.json(parsed);
     } catch (err) {
+      if (debugFeedback) {
+        console.error(
+          '[feedback:debug] provider error data:',
+          JSON.stringify((err && err.data) || null).slice(0, 4000)
+        );
+      }
       console.error(`[${provider.name}] feedback error:`, err && err.message ? err.message : err);
       sendProviderError(res, err);
     }

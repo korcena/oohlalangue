@@ -1148,48 +1148,70 @@ async function runFeedbackRepair(firstFeedback, secondFeedback, answers = rating
   return { ...outcome, calls: call };
 }
 
-test('POST /api/feedback repairs a missing, zero or over-max score', async () => {
+test('POST /api/feedback normalizes missing, zero, over-max and wrong-max scores without repair', async () => {
   const cases = [
-    (feedback) => {
-      delete feedback.answers[5].score;
-      delete feedback.answers[5].max_score;
+    {
+      mutate: (feedback) => {
+        delete feedback.answers[5].score;
+        delete feedback.answers[5].max_score;
+      },
+      score: 1,
+      max: 10
     },
-    (feedback) => {
-      feedback.answers[5].score = 0;
+    {
+      mutate: (feedback) => {
+        feedback.answers[5].score = 0;
+      },
+      score: 1,
+      max: 10
     },
-    (feedback) => {
-      feedback.answers[5].score = 11;
+    {
+      mutate: (feedback) => {
+        feedback.answers[5].score = 11;
+      },
+      score: 10,
+      max: 10
+    },
+    {
+      mutate: (feedback) => {
+        feedback.answers[5].score = 4;
+        feedback.answers[5].max_score = 5;
+      },
+      score: 8,
+      max: 10
     }
   ];
-  for (const mutate of cases) {
+  for (const { mutate, score, max } of cases) {
     const first = ratingRouteFeedback();
     mutate(first);
     const outcome = await runFeedbackRepair(first, ratingRouteFeedback());
     assert.equal(outcome.status, 200);
-    assert.equal(outcome.calls, 2, 'an invalid rating must trigger exactly one repair');
+    assert.equal(outcome.calls, 1, 'rating anomalies are normalized before validation');
     const w4 = outcome.body.answers.find((answer) => answer.question_id === 'w4');
-    assert.equal(w4.max_score, 10);
-    assert.equal(w4.score, 8, 'the repaired score must survive post-processing');
+    assert.equal(w4.max_score, max);
+    assert.equal(w4.score, score);
   }
 });
 
-test('POST /api/feedback repairs a wrong max_score for the last writing question', async () => {
-  const first = ratingRouteFeedback();
-  first.answers[5].score = 5;
-  first.answers[5].max_score = 5;
-  const outcome = await runFeedbackRepair(first, ratingRouteFeedback());
+test('POST /api/feedback normalizes invalid verdict/error_type values without repair', async () => {
+  const feedback = ratingRouteFeedback();
+  feedback.answers[0].verdict = 'excellent';
+  feedback.answers[0].error_type = 'grammar';
+  feedback.answers[1].verdict = 'correct';
+  feedback.answers[1].error_type = 'grammar';
+  const outcome = await runFeedbackRepair(feedback, ratingRouteFeedback());
   assert.equal(outcome.status, 200);
-  assert.equal(outcome.calls, 2);
-  const w4 = outcome.body.answers.find((answer) => answer.question_id === 'w4');
-  assert.equal(w4.max_score, 10);
-  assert.equal(w4.score, 8);
+  assert.equal(outcome.calls, 1);
+  const first = outcome.body.answers.find((answer) => answer.question_id === 'r1');
+  assert.equal(first.verdict, 'mistake');
+  assert.equal(first.error_type, 'error');
+  const choice = outcome.body.answers.find((answer) => answer.question_id === 'c1');
+  assert.equal(choice.verdict, 'correct');
+  assert.equal(choice.error_type, 'style');
 });
 
-test('POST /api/feedback repairs missing, unknown and duplicate answer ids', async () => {
+test('POST /api/feedback filters unknown and duplicate answer ids without repair', async () => {
   const cases = [
-    (feedback) => {
-      feedback.answers = feedback.answers.filter((answer) => answer.question_id !== 'w2');
-    },
     (feedback) => {
       feedback.answers.push(
         Object.assign({}, feedback.answers[2], { question_id: 'unknown' })
@@ -1197,7 +1219,7 @@ test('POST /api/feedback repairs missing, unknown and duplicate answer ids', asy
     },
     (feedback) => {
       feedback.answers.push(
-        Object.assign({}, feedback.answers[2], { question_id: 'w1' })
+        Object.assign({}, feedback.answers[2], { question_id: 'w1', correction: 'DERNIÈRE' })
       );
     }
   ];
@@ -1206,14 +1228,85 @@ test('POST /api/feedback repairs missing, unknown and duplicate answer ids', asy
     mutate(first);
     const outcome = await runFeedbackRepair(first, ratingRouteFeedback());
     assert.equal(outcome.status, 200);
-    assert.equal(outcome.calls, 2, 'a set-completeness error must trigger one repair');
+    assert.equal(outcome.calls, 1, 'unknown/duplicate ids are filtered, not repaired');
     assert.equal(outcome.body.answers.length, 6, 'exactly one row per worksheet question');
     assert.deepEqual(
       outcome.body.answers.map((answer) => answer.question_id),
       ['r1', 'c1', 'w1', 'w2', 'w3', 'w4'],
       'answers are returned in worksheet order'
     );
+    if (mutate.toString().includes('DERNIÈRE')) {
+      assert.equal(
+        outcome.body.answers.find((answer) => answer.question_id === 'w1').correction,
+        'DERNIÈRE',
+        'the last known duplicate wins'
+      );
+    }
   }
+});
+
+test('POST /api/feedback repairs a missing answer for a question the learner answered', async () => {
+  const first = ratingRouteFeedback();
+  first.answers = first.answers.filter((answer) => answer.question_id !== 'w2');
+  const outcome = await runFeedbackRepair(first, ratingRouteFeedback());
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.calls, 2, 'a missing answered question still gets one repair');
+  assert.deepEqual(
+    outcome.body.answers.map((answer) => answer.question_id),
+    ['r1', 'c1', 'w1', 'w2', 'w3', 'w4']
+  );
+});
+
+test('POST /api/feedback synthesizes omitted blank answers without repair', async () => {
+  const feedback = ratingRouteFeedback();
+  feedback.answers = feedback.answers.filter(
+    (answer) => answer.question_id === 'w1' || answer.question_id === 'w4'
+  );
+  const answers = { w1: 'a', w4: 'a' };
+  const outcome = await runFeedbackRepair(feedback, feedback, answers);
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.calls, 1, 'omitted blank rows are synthesized before validation');
+  assert.equal(outcome.body.answers.length, 6);
+
+  const blank = outcome.body.answers.find((answer) => answer.question_id === 'r1');
+  assert.equal(blank.original, '');
+  assert.equal(blank.verdict, 'mistake');
+  assert.equal(blank.error_type, 'error');
+  assert.equal(blank.score, 1);
+  assert.equal(blank.max_score, 5);
+  assert.equal(blank.correction, 'a', "the worksheet's expected answer is used");
+  assert.equal(blank.explanation, 'Aucune réponse fournie.');
+
+  const choice = outcome.body.answers.find((answer) => answer.question_id === 'c1');
+  assert.equal(choice.score, undefined);
+  assert.equal(choice.max_score, undefined);
+});
+
+test('POST /api/feedback repairs invalid JSON once then returns the clear 502', async () => {
+  let call = 0;
+  const fetchImpl = makeFetchMock(() => {
+    call += 1;
+    return jsonResponse(200, { message: { content: 'not json at all' } });
+  });
+  const app = createApp({ httpRequest: fetchImpl, env: { OLLAMA_API_KEY: 'k', OLLAMA_MODEL: 'm' } });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ worksheet: ratingRouteWorksheet(), answers: {} })
+    });
+    assert.equal(res.status, 502);
+    assert.equal(call, 2, 'exactly one repair retry');
+    assert.match((await res.json()).error.message, /correction valide après une tentative de correction/);
+  });
+});
+
+test('POST /api/feedback repairs a missing correction or explanation once', async () => {
+  const first = ratingRouteFeedback();
+  first.answers[0].correction = '   ';
+  const outcome = await runFeedbackRepair(first, ratingRouteFeedback());
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.calls, 2, 'missing correction/explanation goes through the one repair');
 });
 
 test('POST /api/feedback overwrites fabricated originals and makes blanks mistake/error with score 1', async () => {
@@ -1438,6 +1531,11 @@ test('POST /api/feedback sends a French-only system prompt', async () => {
     assert.equal(res.status, 200);
     const system = fetchImpl.calls[0].body.messages[0].content;
     assert.match(system, /French only/i);
+    assert.equal(
+      fetchImpl.calls[0].body.options.num_predict,
+      6000,
+      'the default feedback token budget covers the complete answer set'
+    );
   });
 });
 
@@ -1550,6 +1648,7 @@ test('buildFeedbackPrompt emits max_score per question and the rating rubric', (
     ]
   };
   const prompt = buildFeedbackPrompt(worksheet, {});
+  assert.match(prompt, /The worksheet has 5 questions/);
   assert.match(prompt, /question_id: r1[\s\S]*max_score: none/);
   assert.match(prompt, /question_id: w1[\s\S]*max_score: 5/);
   assert.match(prompt, /question_id: w4[\s\S]*max_score: 10/);
@@ -1558,6 +1657,7 @@ test('buildFeedbackPrompt emits max_score per question and the rating rubric', (
   assert.match(prompt, /A blank answer gets 1/);
   assert.match(prompt, /Rating is independent of the verdict|rating is independent of the verdict/);
   assert.match(prompt, /omit both "score" and "max_score"/);
+  assert.doesNotMatch(prompt, /"original":/);
 });
 
 test('buildFeedbackPrompt keeps max_score none for choice and 5 for a legacy form', () => {

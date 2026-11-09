@@ -130,6 +130,9 @@ with mocked dependencies; see `npm test`.
       and gets score 1 when rated.
 - [ ] Each rated feedback card shows `Note : X/Y` (1–5, or 1–10 for the last writing message) and
       the summary shows `Points : X/Y`; multiple-choice cards show no rating.
+- [ ] A partial/blank submission still returns feedback: omitted blank answers are synthesized,
+      wrong rating scales are normalized, and unknown/duplicate ids are filtered rather than
+      producing a 502.
 - [ ] The summary card shows strengths (Points forts), recurring mistakes (Erreurs récurrentes),
       priorities (Priorités) and follow-up (Exercice de suivi).
 - [ ] Refresh keeps feedback.

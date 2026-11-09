@@ -80,7 +80,7 @@ from the original app; it is intentionally not configurable.
 
 Optional advanced overrides (built-in defaults in parentheses): `AI_TIMEOUT_MS` (chat 30000;
 worksheet/feedback 45000), `TTS_TIMEOUT_MS` (45000), `WORKSHEET_MAX_TOKENS` (3000),
-`FEEDBACK_MAX_TOKENS` (3000). Large cloud models may need a higher `AI_TIMEOUT_MS` (e.g. `120000`).
+`FEEDBACK_MAX_TOKENS` (6000). Large cloud models may need a higher `AI_TIMEOUT_MS` (e.g. `120000`).
 
 `GET /health` reports which providers are configured **as booleans only** — it never returns a
 key. The model name is never hardcoded into prompts.
@@ -290,11 +290,14 @@ multiple-choice ratings are ignored and stripped. Legacy `form` answers remain r
 blank answer gets 1, and the rating is independent of the verdict. The feedback contract includes
 `score` and `max_score`; the server computes `max_score` and overwrites any model-supplied value.
 The teacher summary shows `Points : X/Y` (rating-based); the progress chart stays verdict-based.
-Feedback must contain exactly one answer for every worksheet question, including blank answers;
-unknown or duplicate ids are rejected and repaired. The server returns one answer per question in
-worksheet order (the repair prompt asks the model to do the same); worksheet order is not a
-validation requirement. A blank answer is normalized to `verdict: "mistake"` and
-`error_type: "error"` with score 1 when rated, so it can never display a green "Correct".
+Feedback must contain exactly one answer for every worksheet question, including blank answers.
+The server normalizes the model response before validating: omitted blank answers are synthesized,
+unknown/duplicate ids are filtered (last known duplicate wins), wrong rating scales are rescaled,
+and out-of-range scores are clamped. The one-shot repair is reserved for unparseable JSON or
+missing correction/explanation. The server returns one answer per question in worksheet order (the
+repair prompt asks the model to do the same); worksheet order is not a validation requirement. A
+blank answer is normalized to `verdict: "mistake"` and `error_type: "error"` with score 1 when
+rated, so it can never display a green "Correct".
 
 The `audio` block appears **only** on the `listening` section; `text_fr` (the French reading
 passage) appears **only** on the `reading` section and is required there. Every learner-facing
